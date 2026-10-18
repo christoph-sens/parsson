@@ -1,0 +1,54 @@
+name: JSONPath integration branch CI
+
+# Baseline CI for the `jsonpath` integration branch: Maven build + unchanged JSON-P TCK (tck-impl, TCK 2.1.1).
+on:
+  push:
+    branches: [ jsonpath ]
+  pull_request:
+    branches: [ jsonpath ]
+
+concurrency:
+  group: jsonpath-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-tck:
+    name: JDK ${{ matrix.java_version }} / TCK ${{ matrix.test_suite }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java_version: [ 11, 17, 21, 25 ]
+        test_suite: [ mods, standalone ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK ${{ matrix.java_version }} (build and test JVM)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java_version }}
+          cache: maven
+      - name: Remember test JDK
+        run: echo "TEST_JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+      - name: Build Parsson
+        run: mvn -B -V -U -C -Poss-release,staging clean verify -Dgpg.skip=true
+      - name: Prepare distribution
+        run: unzip -q -d image bundles/dist/target/parsson-dist.zip
+      - name: Set up JDK 17 (runs Gradle 7.6.5, which cannot run on JDK 25)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: JSON-P TCK against Parsson
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 7.6.5
+      - name: Run TCK
+        run: gradle -p tck-impl check -I "$GITHUB_WORKSPACE/.github/ci/test-jvm.init.gradle" -Pparsson.home=image/parsson-dist -Pparsson.impl=${{ matrix.test_suite }}
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tck-results-jdk${{ matrix.java_version }}-${{ matrix.test_suite }}
+          path: tck-impl/build/distributions/tck-test-results.zip
+          if-no-files-found: ignore

@@ -1,0 +1,10 @@
+// Runs the Gradle build on the JDK that Gradle supports, but executes all test tasks
+// on the JDK under test (TEST_JAVA_HOME). Lets us test on JDK 11 and 25 without changing tck-impl/build.gradle.
+allprojects {
+    tasks.withType(Test).configureEach {
+        def testHome = System.getenv('TEST_JAVA_HOME')
+        if (testHome) {
+            executable = "${testHome}/bin/java"
+        }
+    }
+}
