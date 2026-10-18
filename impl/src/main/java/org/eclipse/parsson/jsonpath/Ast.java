@@ -18,6 +18,7 @@ package org.eclipse.parsson.jsonpath;
 
 import java.util.List;
 
+import jakarta.json.JsonString;
 import jakarta.json.JsonValue;
 
 /**
@@ -155,10 +156,19 @@ final class Ast {
 
         final Function function;
         final List<Argument> arguments;
+        /** The compiled patterns of {@code match()} and {@code search()}; {@code null} for other functions. */
+        final Patterns patterns;
 
         FunctionCall(Function function, List<Argument> arguments) {
             this.function = function;
             this.arguments = arguments;
+            if (function == Function.MATCH || function == Function.SEARCH) {
+                Argument pattern = arguments.get(1);
+                boolean literal = pattern instanceof Literal && ((Literal) pattern).value instanceof JsonString;
+                this.patterns = new Patterns(literal ? ((JsonString) ((Literal) pattern).value).getString() : null);
+            } else {
+                this.patterns = null;
+            }
         }
     }
 

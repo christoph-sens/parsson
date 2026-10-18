@@ -17,10 +17,14 @@
 package org.eclipse.parsson.jsonpath;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.fail;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.stream.Stream;
 
 import jakarta.json.JsonException;
+import jakarta.json.JsonValue;
 import jakarta.json.spi.JsonProvider;
 
 import org.eclipse.parsson.JsonProviderImpl;
@@ -28,7 +32,8 @@ import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.TestFactory;
 
 /**
- * Runs the JSONPath Compliance Test Suite: invalid selectors must be rejected, valid ones accepted.
+ * Runs the JSONPath Compliance Test Suite: invalid selectors must be rejected, valid ones must select the
+ * expected values (compared as JSON values) at the expected normalized paths.
  */
 class ComplianceTest {
 
@@ -44,9 +49,40 @@ class ComplianceTest {
     }
 
     @TestFactory
-    Stream<DynamicTest> validSelectorsAreAccepted() {
+    Stream<DynamicTest> validSelectorsSelectTheExpectedNodes() {
         return ComplianceSuite.cases().stream()
                 .filter(test -> !test.invalidSelector)
-                .map(test -> DynamicTest.dynamicTest(test.toString(), () -> Parser.parse(test.selector, PROVIDER)));
+                .map(test -> DynamicTest.dynamicTest(test.toString(), () -> run(test)));
+    }
+
+    private static void run(ComplianceSuite.Case test) {
+        List<NodeImpl> nodes = new Evaluator(test.document, PROVIDER).run(Parser.parse(test.selector, PROVIDER));
+        List<JsonValue> values = new ArrayList<>();
+        List<String> paths = new ArrayList<>();
+        for (NodeImpl node : nodes) {
+            values.add(node.value());
+            paths.add(node.normalizedPath());
+        }
+        for (int i = 0; i < test.results.size(); i++) {
+            boolean pathsMatch = test.resultPaths.isEmpty() || paths.equals(test.resultPaths.get(i));
+            if (pathsMatch && sameValues(values, test.results.get(i))) {
+                return;
+            }
+        }
+        fail("Expected " + (test.results.size() == 1 ? test.results.get(0) : "one of " + test.results)
+                + (test.resultPaths.isEmpty() ? "" : " at " + test.resultPaths)
+                + ", but the query selected " + values + " at " + paths);
+    }
+
+    private static boolean sameValues(List<JsonValue> actual, List<JsonValue> expected) {
+        if (actual.size() != expected.size()) {
+            return false;
+        }
+        for (int i = 0; i < actual.size(); i++) {
+            if (!Values.jsonEquals(actual.get(i), expected.get(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 }
