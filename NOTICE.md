@@ -46,7 +46,14 @@ The project maintains the following source code repositories:
 
 This project leverages the following third party content.
 
-None
+Unicode Character Database 16.0.0 (data derived from it)
+
+* License: Unicode License V3
+* Project: https://www.unicode.org/ucd/
+* Source: https://www.unicode.org/Public/16.0.0/ucd/UnicodeData.txt
+* Use: the Unicode general category tables in
+  `org.eclipse.parsson.jsonpath.regex.UnicodeCategoryData`, Copyright (c) 1991-2026
+  Unicode, Inc.; license text in `META-INF/UNICODE-LICENSE.txt` of the Parsson jar
 
 ## Cryptography
 

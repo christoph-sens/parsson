@@ -6,3 +6,4 @@ MANIFEST.MF
 /etc/config/copyright-exclude
 /etc/config/copyright.txt
 /bundles/dist/src/main/resources/README.txt
+/META-INF/UNICODE-LICENSE.txt
