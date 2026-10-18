@@ -14,7 +14,9 @@ name: Parsson build
 
 on:
   pull_request:
+    branches-ignore: [ jsonpath ]
   push:
+    branches-ignore: [ jsonpath ]
 
 concurrency:
   group: ${{ github.ref }}
