@@ -1,6 +1,13 @@
 name: JSONPath integration branch CI
 
-# Baseline CI for the `jsonpath` integration branch: Maven build + unchanged JSON-P TCK (tck-impl, TCK 2.1.1).
+# CI for the `jsonpath` integration branch: Maven build + unchanged JSON-P TCK (tck-impl, TCK 2.1.1).
+#
+# The branch implements JSONPath (RFC 9535) against the JSON-P API 2.2.0-SNAPSHOT from christoph-sens/jsonp-api,
+# branch jsonpath, which is not published anywhere; each job builds and installs it first (its build needs JDK 17).
+#
+# The signature test of TCK 2.1.1 is skipped: it requires the package jakarta.json to have exactly the 2.1
+# signature, and API 2.2 adds JsonPath, Json.createPath and JsonProvider.createPath. The 2.2 signature is checked
+# by the TCK in christoph-sens/jsonp-api. All other tests of TCK 2.1.1 run unchanged.
 on:
   push:
     branches: [ jsonpath ]
@@ -22,6 +29,20 @@ jobs:
         test_suite: [ mods, standalone ]
     steps:
       - uses: actions/checkout@v4
+      - name: Check out the JSON-P API with JSONPath (christoph-sens/jsonp-api, branch jsonpath)
+        uses: actions/checkout@v4
+        with:
+          repository: christoph-sens/jsonp-api
+          ref: jsonpath
+          path: jsonp-api
+      - name: Set up JDK 17 (builds the API, which needs release 17)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+      - name: Build and install JSON-P API 2.2.0-SNAPSHOT
+        run: mvn -B -V -U -C -f jsonp-api/api/pom.xml -Poss-release install -DskipTests -Dgpg.skip=true
       - name: Set up JDK ${{ matrix.java_version }} (build and test JVM)
         uses: actions/setup-java@v4
         with:
@@ -44,7 +65,7 @@ jobs:
         with:
           gradle-version: 7.6.5
       - name: Run TCK
-        run: gradle -p tck-impl check -I "$GITHUB_WORKSPACE/.github/ci/test-jvm.init.gradle" -Pparsson.home=image/parsson-dist -Pparsson.impl=${{ matrix.test_suite }}
+        run: gradle -p tck-impl check -x signatureTest -I "$GITHUB_WORKSPACE/.github/ci/test-jvm.init.gradle" -Pparsson.home=image/parsson-dist -Pparsson.impl=${{ matrix.test_suite }}
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
