@@ -16,7 +16,9 @@ on:
   pull_request:
     branches-ignore: [ jsonpath ]
   push:
-    branches-ignore: [ jsonpath ]
+    # jsonpath-ci.yml replaces this workflow on the jsonpath branch and on the ticket branches made from it,
+    # which need the JSON-P API 2.2.0-SNAPSHOT; this version of the file is only on those branches.
+    branches: [ master ]
 
 concurrency:
   group: ${{ github.ref }}

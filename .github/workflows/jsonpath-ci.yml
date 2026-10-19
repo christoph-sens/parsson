@@ -3,7 +3,11 @@ name: JSONPath integration branch CI
 # CI for the `jsonpath` integration branch: Maven build + unchanged JSON-P TCK (tck-impl, TCK 2.1.1).
 #
 # The branch implements JSONPath (RFC 9535) against the JSON-P API 2.2.0-SNAPSHOT from christoph-sens/jsonp-api,
-# branch jsonpath, which is not published anywhere; each job builds and installs it first (its build needs JDK 17).
+# branch jsonpath, which is not published anywhere; each job builds and installs it first.
+#
+# JDK 11 is not in the matrix: the JSON-P API 2.2 is compiled for Java 17 (jakartaee/jsonp-api master moved to
+# release 17 in November 2025), so Parsson built against it cannot run on JDK 11. Parsson's own classes are still
+# compiled for Java 8.
 #
 # The signature test of TCK 2.1.1 is skipped: it requires the package jakarta.json to have exactly the 2.1
 # signature, and API 2.2 adds JsonPath, Json.createPath and JsonProvider.createPath. The 2.2 signature is checked
@@ -25,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        java_version: [ 11, 17, 21, 25 ]
+        java_version: [ 17, 21, 25 ]
         test_suite: [ mods, standalone ]
     steps:
       - uses: actions/checkout@v4
@@ -35,7 +39,7 @@ jobs:
           repository: christoph-sens/jsonp-api
           ref: jsonpath
           path: jsonp-api
-      - name: Set up JDK 17 (builds the API, which needs release 17)
+      - name: Set up JDK 17 (builds the API)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
