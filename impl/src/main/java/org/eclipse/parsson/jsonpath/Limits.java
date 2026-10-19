@@ -35,6 +35,8 @@ import org.eclipse.parsson.jsonpath.regex.IRegexp;
  *     <li>{@code maxResultSize}: nodes in a result.</li>
  *     <li>{@code maxDepth}: how deep a query walks into the query argument and how deep {@code ==} compares
  *     values; the root has depth 0, its children depth 1.</li>
+ *     <li>{@code maxBufferedNodes}: nodes of the values a streaming run holds because it cannot report or
+ *     decide them yet.</li>
  *     <li>{@code maxNesting}: nesting of filters, parenthesized expressions and function calls in the
  *     query string, checked by the parser.</li>
  *     <li>{@code maxRegexSize}: automaton instructions of a regular expression in {@code match()} and
@@ -52,11 +54,15 @@ final class Limits {
     /** Default maximum nesting depth, the default of Parsson's parser. */
     static final int DEFAULT_MAX_DEPTH = 1000;
 
+    /** Default maximum number of nodes a streaming run holds, roughly a gigabyte. */
+    static final long DEFAULT_MAX_BUFFERED_NODES = 10_000_000L;
+
     static final Limits DEFAULT = new Limits(DEFAULT_MAX_VISITED_NODES, DEFAULT_MAX_RESULT_SIZE, DEFAULT_MAX_DEPTH);
 
     final long maxVisitedNodes;
     final int maxResultSize;
     final int maxDepth;
+    final long maxBufferedNodes;
     final int maxNesting;
     final int maxRegexSize;
 
@@ -66,7 +72,8 @@ final class Limits {
      * @throws IllegalArgumentException if a limit is negative
      */
     Limits(long maxVisitedNodes, int maxResultSize, int maxDepth) {
-        this(maxVisitedNodes, maxResultSize, maxDepth, Parser.MAX_NESTING, IRegexp.MAX_PROGRAM_SIZE);
+        this(maxVisitedNodes, maxResultSize, maxDepth, DEFAULT_MAX_BUFFERED_NODES, Parser.MAX_NESTING,
+                IRegexp.MAX_PROGRAM_SIZE);
     }
 
     /**
@@ -74,15 +81,18 @@ final class Limits {
      *
      * @throws IllegalArgumentException if a limit is negative
      */
-    Limits(long maxVisitedNodes, int maxResultSize, int maxDepth, int maxNesting, int maxRegexSize) {
-        if (maxVisitedNodes < 0 || maxResultSize < 0 || maxDepth < 0 || maxNesting < 0 || maxRegexSize < 0) {
+    Limits(long maxVisitedNodes, int maxResultSize, int maxDepth, long maxBufferedNodes, int maxNesting,
+           int maxRegexSize) {
+        if (maxVisitedNodes < 0 || maxResultSize < 0 || maxDepth < 0 || maxBufferedNodes < 0 || maxNesting < 0
+                || maxRegexSize < 0) {
             throw new IllegalArgumentException("Limits must not be negative: maxVisitedNodes=" + maxVisitedNodes
-                    + ", maxResultSize=" + maxResultSize + ", maxDepth=" + maxDepth + ", maxNesting=" + maxNesting
-                    + ", maxRegexSize=" + maxRegexSize);
+                    + ", maxResultSize=" + maxResultSize + ", maxDepth=" + maxDepth + ", maxBufferedNodes="
+                    + maxBufferedNodes + ", maxNesting=" + maxNesting + ", maxRegexSize=" + maxRegexSize);
         }
         this.maxVisitedNodes = maxVisitedNodes;
         this.maxResultSize = maxResultSize;
         this.maxDepth = maxDepth;
+        this.maxBufferedNodes = maxBufferedNodes;
         this.maxNesting = maxNesting;
         this.maxRegexSize = maxRegexSize;
     }
@@ -90,7 +100,8 @@ final class Limits {
     /**
      * Returns these limits, overridden by the properties of {@link JsonPath} in {@code config}:
      * {@link JsonPath#MAX_VISITED_NODES}, {@link JsonPath#MAX_RESULT_SIZE}, {@link JsonPath#MAX_DEPTH},
-     * {@link JsonPath#MAX_NESTING} and {@link JsonPath#MAX_REGEX_SIZE}. Other properties are ignored.
+     * {@link JsonPath#MAX_BUFFERED_NODES}, {@link JsonPath#MAX_NESTING} and {@link JsonPath#MAX_REGEX_SIZE}.
+     * Other properties are ignored.
      *
      * @throws JsonException if one of these properties is not a non-negative integer, given as a
      *     {@link Number} or a decimal {@link String}, in the range of the limit
@@ -100,6 +111,7 @@ final class Limits {
                 property(config, JsonPath.MAX_VISITED_NODES, maxVisitedNodes, Long.MAX_VALUE),
                 (int) property(config, JsonPath.MAX_RESULT_SIZE, maxResultSize, Integer.MAX_VALUE),
                 (int) property(config, JsonPath.MAX_DEPTH, maxDepth, Integer.MAX_VALUE),
+                property(config, JsonPath.MAX_BUFFERED_NODES, maxBufferedNodes, Long.MAX_VALUE),
                 (int) property(config, JsonPath.MAX_NESTING, maxNesting, Integer.MAX_VALUE),
                 (int) property(config, JsonPath.MAX_REGEX_SIZE, maxRegexSize, Integer.MAX_VALUE));
     }

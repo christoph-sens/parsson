@@ -88,6 +88,62 @@ class JsonPathConfigTest {
         assertThrows(JsonException.class, () -> path("$..[?@ == 1]", JsonPath.MAX_DEPTH, 3).query(deep));
     }
 
+    private static int streamCount(JsonPath path, String json) {
+        try (jakarta.json.stream.JsonParser parser = PROVIDER.createParser(new java.io.StringReader(json))) {
+            JsonPath.Matcher matcher = path.matcher(parser);
+            int count = 0;
+            while (matcher.find()) {
+                count++;
+            }
+            return count;
+        }
+    }
+
+    @Test
+    void limitsTheNodesTheMatcherHolds() {
+        // The candidate {"a":1,"b":[1..9]} has 12 nodes: the object, a, the array and its 9 elements.
+        String candidate = "[{\"a\": 1, \"b\": [1, 2, 3, 4, 5, 6, 7, 8, 9]}]";
+        assertEquals(1, streamCount(path("$[?@.a]", JsonPath.MAX_BUFFERED_NODES, 12), candidate));
+        assertEquals("Query buffered more than 11 nodes of the query argument, the limit",
+                assertThrows(JsonException.class,
+                        () -> streamCount(path("$[?@.a]", JsonPath.MAX_BUFFERED_NODES, 11), candidate)).getMessage());
+        // The limit does not apply to the tree layer.
+        assertEquals(1, path("$[?@.a]", JsonPath.MAX_BUFFERED_NODES, 0).query(json(candidate)).size());
+
+        // [-n] holds about n elements, whatever the length of the array.
+        StringBuilder numbers = new StringBuilder("[0");
+        for (int i = 1; i < 1000; i++) {
+            numbers.append(',').append(i);
+        }
+        String array = numbers.append(']').toString();
+        assertEquals(1, streamCount(path("$[-50]", JsonPath.MAX_BUFFERED_NODES, 100), array));
+        assertThrows(JsonException.class, () -> streamCount(path("$[-500]", JsonPath.MAX_BUFFERED_NODES, 100), array));
+        // Held values are released: a filter over 1000 small candidates never holds more than one.
+        assertEquals(1000, streamCount(path("$[?@ >= 0]", JsonPath.MAX_BUFFERED_NODES, 1), array));
+        // Class NONE holds nothing.
+        assertEquals(1000, streamCount(path("$..*", JsonPath.MAX_BUFFERED_NODES, 0), array));
+    }
+
+    @Test
+    void failsWhereAnyEvaluationReachesANodeBelowTheDepthLimit() {
+        JsonValue nested = json("[[[1]]]");
+        for (String query : new String[] {"$[0][0][0]", "$[*][*][*]", "$..*", "$[0][0][?@ == 1]", "$[0][0][0:1]"}) {
+            assertEquals(1, path(query, JsonPath.MAX_DEPTH, 3).query(nested).size() > 0 ? 1 : 0, query);
+            streamCount(path(query, JsonPath.MAX_DEPTH, 3), "[[[1]]]");
+            assertThrows(JsonException.class, () -> path(query, JsonPath.MAX_DEPTH, 2).query(nested), query);
+            assertThrows(JsonException.class, () -> streamCount(path(query, JsonPath.MAX_DEPTH, 2), "[[[1]]]"), query);
+        }
+        // An empty array at the limit has no node below it to reach.
+        assertEquals(2, path("$..*", JsonPath.MAX_DEPTH, 2).query(json("[[[]]]")).size());
+        assertEquals(2, streamCount(path("$..*", JsonPath.MAX_DEPTH, 2), "[[[]]]"));
+        // A name that selects nothing reaches nothing.
+        assertEquals(0, path("$[0][0].x", JsonPath.MAX_DEPTH, 2).query(nested).size());
+        assertEquals(0, streamCount(path("$[0][0].x", JsonPath.MAX_DEPTH, 2), "[[[1]]]"));
+        // The matcher considers every element as a candidate of [-5]; query() computes the index.
+        assertEquals(0, path("$[0][-5]", JsonPath.MAX_DEPTH, 1).query(json("[[1, 2]]")).size());
+        assertThrows(JsonException.class, () -> streamCount(path("$[0][-5]", JsonPath.MAX_DEPTH, 1), "[[1, 2]]"));
+    }
+
     @Test
     void limitsTheNestingOfTheQuery() {
         assertEquals(1, path("$[?@.a]", JsonPath.MAX_NESTING, 1).query(json("[{'a': 1}]")).size());

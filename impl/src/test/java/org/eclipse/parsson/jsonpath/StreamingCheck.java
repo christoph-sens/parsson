@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.StringReader;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
@@ -85,6 +86,7 @@ final class StreamingCheck {
             }
             assertFalse(parser.hasNext(), "the matcher read the whole value, nothing more");
             assertFalse(matcher.find(), "find() stays false");
+            assertEquals(0, ((StreamingMatcher) matcher).bufferedNodes(), "all held values released");
         }
         return matches;
     }
@@ -124,7 +126,37 @@ final class StreamingCheck {
         }
         if (path.getBuffering() == JsonPath.Buffering.NONE) {
             checkAtParser(path, json, context);
+            // Class NONE holds nothing, so it streams with no buffer at all, whichever values are taken.
+            JsonPath unbuffered = PROVIDER.createPath(query, Collections.singletonMap(JsonPath.MAX_BUFFERED_NODES, 0));
+            for (Take take : Take.values()) {
+                assertEquals(expected.size(), stream(unbuffered, json, take).size(), context + ", no buffer");
+            }
         }
+        if (inRfcOrder(Parser.parse(query, PROVIDER))) {
+            List<String> rfcPaths = new ArrayList<>();
+            for (JsonPath.Node node : path.query(document)) {
+                rfcPaths.add(node.getPath());
+            }
+            List<String> streamPaths = new ArrayList<>();
+            for (Match match : stream(path, json, Take.NONE)) {
+                streamPaths.add(match.path);
+            }
+            assertEquals(rfcPaths, streamPaths, context + ": the matcher must keep RFC 9535 order");
+        }
+    }
+
+    /** The condition of the API under which document order is RFC 9535 order. */
+    static boolean inRfcOrder(Ast.Query query) {
+        for (Ast.Segment segment : query.segments) {
+            if (segment.descendant || segment.selectors.size() != 1) {
+                return false;
+            }
+            Ast.Selector selector = segment.selectors.get(0);
+            if (selector instanceof Ast.Slice && ((Ast.Slice) selector).step != null && ((Ast.Slice) selector).step < 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Class NONE, no values taken: at each match the parser's current event is the first event of the value. */
