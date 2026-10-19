@@ -75,11 +75,12 @@ final class Evaluator {
      * Creates an evaluator.
      *
      * @param document the query argument
-     * @param provider creates the numbers that {@code length()} and {@code count()} return
+     * @param provider creates the numbers that {@code length()} and {@code count()} return, and the
+     *     {@link jakarta.json.JsonPointer}s of the selected nodes
      */
     Evaluator(JsonValue document, JsonProvider provider) {
         this.provider = provider;
-        this.root = NodeImpl.root(document);
+        this.root = NodeImpl.root(provider, document);
     }
 
     /** Receives the nodes a query selects, in order; returns false to stop the evaluation. */
@@ -199,7 +200,7 @@ final class Evaluator {
 
     /** Pushes the children of a node, in order, for the walk of a descendant segment. */
     private void pushChildren(NodeImpl node, NodeStack stack) {
-        JsonValue value = node.value();
+        JsonValue value = node.getValue();
         ValueType kind = value.getValueType();
         if (kind == ValueType.OBJECT) {
             for (Map.Entry<String, JsonValue> member : ((JsonObject) value).entrySet()) {
@@ -243,7 +244,7 @@ final class Evaluator {
             }
             return true;
         }
-        JsonValue value = node.value();
+        JsonValue value = node.getValue();
         ValueType kind = value.getValueType();
         if (selector instanceof Name) {
             if (kind == ValueType.OBJECT) {
@@ -277,7 +278,7 @@ final class Evaluator {
      * one by one.
      */
     private boolean selectChildren(NodeImpl node, Expr filter, List<Segment> segments, int next, Sink sink) {
-        JsonValue value = node.value();
+        JsonValue value = node.getValue();
         ValueType kind = value.getValueType();
         if (kind == ValueType.OBJECT) {
             for (Map.Entry<String, JsonValue> member : ((JsonObject) value).entrySet()) {
@@ -382,7 +383,7 @@ final class Evaluator {
         }
         if (operand instanceof QueryOperand) {
             NodeImpl first = firstOf(((QueryOperand) operand).query, current);
-            return first == null ? null : first.value();
+            return first == null ? null : first.getValue();
         }
         // The parser admits only functions of ValueType here: length(), count() and value().
         FunctionCall call = (FunctionCall) operand;
@@ -394,7 +395,7 @@ final class Evaluator {
                 return provider.createValue(nodes(argument, current).size());
             case VALUE:
                 List<NodeImpl> nodes = nodes(argument, current);
-                return nodes.size() == 1 ? nodes.get(0).value() : null;
+                return nodes.size() == 1 ? nodes.get(0).getValue() : null;
             default:
                 throw new IllegalStateException(call.function.name());
         }
