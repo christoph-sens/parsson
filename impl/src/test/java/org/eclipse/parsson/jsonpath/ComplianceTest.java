@@ -60,8 +60,8 @@ class ComplianceTest {
         List<JsonValue> values = new ArrayList<>();
         List<String> paths = new ArrayList<>();
         for (NodeImpl node : nodes) {
-            values.add(node.value());
-            paths.add(node.normalizedPath());
+            values.add(node.getValue());
+            paths.add(node.getPath());
         }
         for (int i = 0; i < test.results.size(); i++) {
             boolean pathsMatch = test.resultPaths.isEmpty() || paths.equals(test.resultPaths.get(i));

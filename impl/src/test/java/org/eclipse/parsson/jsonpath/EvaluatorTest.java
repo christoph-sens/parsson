@@ -65,7 +65,7 @@ class EvaluatorTest {
     static List<JsonValue> values(String query, JsonValue document) {
         List<JsonValue> values = new ArrayList<>();
         for (NodeImpl node : query(query, document)) {
-            values.add(node.value());
+            values.add(node.getValue());
         }
         return values;
     }
@@ -73,7 +73,7 @@ class EvaluatorTest {
     static List<String> paths(String query, JsonValue document) {
         List<String> paths = new ArrayList<>();
         for (NodeImpl node : query(query, document)) {
-            paths.add(node.normalizedPath());
+            paths.add(node.getPath());
         }
         return paths;
     }
@@ -122,8 +122,8 @@ class EvaluatorTest {
         List<NodeImpl> nodes = query("$.a", json("{'a': null}"));
 
         assertEquals(1, nodes.size());
-        assertSame(JsonValue.NULL, nodes.get(0).value());
-        assertEquals("$['a']", nodes.get(0).normalizedPath());
+        assertSame(JsonValue.NULL, nodes.get(0).getValue());
+        assertEquals("$['a']", nodes.get(0).getPath());
         assertTrue(query("$.a", json("{}")).isEmpty());
         assertEquals(Collections.singletonList("$[0]"), paths("$[?@.a]", json("[{'a': null}, {}]")));
         assertEquals(Collections.singletonList("$[0]"), paths("$[?@.a == null]", json("[{'a': null}, {}]")));

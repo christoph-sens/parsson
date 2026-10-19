@@ -16,16 +16,22 @@
 
 package org.eclipse.parsson.jsonpath;
 
+import jakarta.json.JsonPath;
+import jakarta.json.JsonPointer;
 import jakarta.json.JsonValue;
+import jakarta.json.spi.JsonProvider;
 
 /**
  * A node of the query argument: a value together with its location. The location is kept as a link to
  * the parent node and the step from there, a member name or an array index, so that a child costs one
- * object and extending a path is O(1); the chain of parents is the path. Path strings are built only
- * when asked for.
+ * object and extending a path is O(1); the chain of parents is the path. Path strings and pointers are
+ * built only when asked for.
+ *
+ * <p>Instances are immutable apart from the cached path, and safe for use by multiple threads.
  */
-final class NodeImpl {
+final class NodeImpl implements JsonPath.Node {
 
+    private final JsonProvider provider;
     private final JsonValue value;
     private final NodeImpl parent;
     /** The member name of the last step, or {@code null} if it is an array index or this is the root. */
@@ -40,7 +46,8 @@ final class NodeImpl {
      */
     private String path;
 
-    private NodeImpl(JsonValue value, NodeImpl parent, String name, int index) {
+    private NodeImpl(JsonProvider provider, JsonValue value, NodeImpl parent, String name, int index) {
+        this.provider = provider;
         this.value = value;
         this.parent = parent;
         this.name = name;
@@ -48,23 +55,68 @@ final class NodeImpl {
         this.depth = parent == null ? 0 : parent.depth + 1;
     }
 
-    /** Returns the root node of a query argument. */
-    static NodeImpl root(JsonValue document) {
-        return new NodeImpl(document, null, null, -1);
+    /**
+     * Returns the root node of a query argument.
+     *
+     * @param provider creates the {@link JsonPointer}s of the node and its descendants
+     * @param document the query argument
+     */
+    static NodeImpl root(JsonProvider provider, JsonValue document) {
+        return new NodeImpl(provider, document, null, null, -1);
     }
 
     /** Returns the member of this node with the given name and value. */
     NodeImpl child(JsonValue value, String name) {
-        return new NodeImpl(value, this, name, -1);
+        return new NodeImpl(provider, value, this, name, -1);
     }
 
     /** Returns the element of this node with the given index and value. */
     NodeImpl child(JsonValue value, int index) {
-        return new NodeImpl(value, this, null, index);
+        return new NodeImpl(provider, value, this, null, index);
     }
 
-    JsonValue value() {
+    @Override
+    public JsonValue getValue() {
         return value;
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Each member name is escaped as RFC 6901 prescribes ({@code ~} as {@code ~0}, {@code /} as
+     * {@code ~1}), each index is written in decimal.
+     */
+    @Override
+    public JsonPointer getPointer() {
+        NodeImpl[] steps = new NodeImpl[depth];
+        NodeImpl n = this;
+        for (int i = depth - 1; i >= 0; i--) {
+            steps[i] = n;
+            n = n.parent;
+        }
+        StringBuilder sb = new StringBuilder(8 * depth);
+        for (NodeImpl step : steps) {
+            sb.append('/');
+            if (step.name != null) {
+                appendPointerName(sb, step.name);
+            } else {
+                sb.append(step.index);
+            }
+        }
+        return provider.createPointer(sb.toString());
+    }
+
+    private static void appendPointerName(StringBuilder sb, String name) {
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c == '~') {
+                sb.append("~0");
+            } else if (c == '/') {
+                sb.append("~1");
+            } else {
+                sb.append(c);
+            }
+        }
     }
 
     /** Returns the number of steps from the root; the root has depth 0. */
@@ -73,12 +125,13 @@ final class NodeImpl {
     }
 
     /**
-     * Returns the location as a normalized path (RFC 9535, section 2.7), for example
-     * {@code $['store']['book'][0]}. The path continues from the nearest ancestor that has built its path
-     * already, so the paths of nodes below other selected nodes, as in {@code $..*}, cost only their own
-     * steps.
+     * {@inheritDoc}
+     *
+     * <p>The path continues from the nearest ancestor that has built its path already, so the paths of nodes
+     * below other selected nodes, as in {@code $..*}, cost only their own steps.
      */
-    String normalizedPath() {
+    @Override
+    public String getPath() {
         String known = path;
         if (known != null) {
             return known;
@@ -153,6 +206,6 @@ final class NodeImpl {
 
     @Override
     public String toString() {
-        return normalizedPath() + " = " + value;
+        return getPath() + " = " + value;
     }
 }
