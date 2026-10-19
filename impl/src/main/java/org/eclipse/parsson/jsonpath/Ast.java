@@ -159,13 +159,14 @@ final class Ast {
         /** The compiled patterns of {@code match()} and {@code search()}; {@code null} for other functions. */
         final Patterns patterns;
 
-        FunctionCall(Function function, List<Argument> arguments) {
+        FunctionCall(Function function, List<Argument> arguments, int maxRegexSize) {
             this.function = function;
             this.arguments = arguments;
             if (function == Function.MATCH || function == Function.SEARCH) {
                 Argument pattern = arguments.get(1);
                 boolean literal = pattern instanceof Literal && ((Literal) pattern).value instanceof JsonString;
-                this.patterns = new Patterns(literal ? ((JsonString) ((Literal) pattern).value).getString() : null);
+                this.patterns = new Patterns(literal ? ((JsonString) ((Literal) pattern).value).getString() : null,
+                        maxRegexSize);
             } else {
                 this.patterns = null;
             }

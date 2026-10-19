@@ -175,6 +175,20 @@ public class JsonProviderImpl extends JsonProvider {
                 emptyContext.jsonPathMaxResultSize(), emptyContext.depthLimit());
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The configuration properties of {@link JsonPath} override the limits that {@link #createPath(String)}
+     * uses: {@link JsonPath#MAX_VISITED_NODES}, {@link JsonPath#MAX_RESULT_SIZE}, {@link JsonPath#MAX_DEPTH},
+     * {@link JsonPath#MAX_NESTING} (default 64) and {@link JsonPath#MAX_REGEX_SIZE}, measured in automaton
+     * instructions (default 20,000). Other properties are ignored.</p>
+     */
+    @Override
+    public JsonPath createPath(String query, Map<String, ?> config) {
+        return JsonPathImpl.create(query, config, this, emptyContext.jsonPathMaxVisitedNodes(),
+                emptyContext.jsonPathMaxResultSize(), emptyContext.depthLimit());
+    }
+
     @Override
     public JsonPatchBuilder createPatchBuilder() {
         return new JsonPatchBuilderImpl(emptyContext);

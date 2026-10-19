@@ -55,10 +55,11 @@ final class RegexProgram {
     /**
      * Compiles a syntax tree.
      *
-     * @throws InvalidRegexp if the automaton would exceed {@link IRegexp#MAX_PROGRAM_SIZE} instructions
+     * @param maxSize the maximum number of instructions
+     * @throws InvalidRegexp if the automaton would exceed {@code maxSize} instructions
      */
-    static RegexProgram compile(RegexTree tree) {
-        Builder builder = new Builder();
+    static RegexProgram compile(RegexTree tree, int maxSize) {
+        Builder builder = new Builder(maxSize);
         builder.emit(tree);
         builder.add(MATCH, -1, -1, NO_SET);
         return new RegexProgram(builder);
@@ -78,9 +79,14 @@ final class RegexProgram {
         final List<Integer> next = new ArrayList<>();
         final List<Integer> alt = new ArrayList<>();
         final List<CharSet> sets = new ArrayList<>();
+        final int maxSize;
+
+        Builder(int maxSize) {
+            this.maxSize = maxSize;
+        }
 
         int add(int op, int nextPc, int altPc, CharSet set) {
-            if (ops.size() >= IRegexp.MAX_PROGRAM_SIZE) {
+            if (ops.size() >= maxSize) {
                 throw new InvalidRegexp();
             }
             ops.add(op);

@@ -16,17 +16,29 @@
 
 package org.eclipse.parsson.jsonpath;
 
+import java.math.BigDecimal;
+import java.util.Map;
+
+import jakarta.json.JsonException;
+import jakarta.json.JsonPath;
+
+import org.eclipse.parsson.jsonpath.regex.IRegexp;
+
 /**
- * Limits for running a query, to bound the work spent on queries and documents from untrusted sources
- * (RFC 9535, section 4.1). A query that exceeds a limit fails with a {@link jakarta.json.JsonException}.
+ * Limits for parsing and running a query, to bound the work spent on queries and documents from untrusted
+ * sources (RFC 9535, section 4.1). A query that exceeds a limit fails with a {@link jakarta.json.JsonException}.
  *
  * <ul>
  *     <li>{@code maxVisitedNodes}: node visits per run; each node a selector produces, each node a descendant
  *     segment walks through and each node a filter tests counts, so the count is roughly proportional to the
- *     time a query takes.</li>
+ *     time a query takes. A streaming run also counts each value it reads from the parser.</li>
  *     <li>{@code maxResultSize}: nodes in a result.</li>
  *     <li>{@code maxDepth}: how deep a query walks into the query argument and how deep {@code ==} compares
  *     values; the root has depth 0, its children depth 1.</li>
+ *     <li>{@code maxNesting}: nesting of filters, parenthesized expressions and function calls in the
+ *     query string, checked by the parser.</li>
+ *     <li>{@code maxRegexSize}: automaton instructions of a regular expression in {@code match()} and
+ *     {@code search()}; a larger one is an invalid pattern.</li>
  * </ul>
  */
 final class Limits {
@@ -45,19 +57,78 @@ final class Limits {
     final long maxVisitedNodes;
     final int maxResultSize;
     final int maxDepth;
+    final int maxNesting;
+    final int maxRegexSize;
+
+    /**
+     * Creates limits with the default nesting and regular expression limits.
+     *
+     * @throws IllegalArgumentException if a limit is negative
+     */
+    Limits(long maxVisitedNodes, int maxResultSize, int maxDepth) {
+        this(maxVisitedNodes, maxResultSize, maxDepth, Parser.MAX_NESTING, IRegexp.MAX_PROGRAM_SIZE);
+    }
 
     /**
      * Creates limits.
      *
      * @throws IllegalArgumentException if a limit is negative
      */
-    Limits(long maxVisitedNodes, int maxResultSize, int maxDepth) {
-        if (maxVisitedNodes < 0 || maxResultSize < 0 || maxDepth < 0) {
+    Limits(long maxVisitedNodes, int maxResultSize, int maxDepth, int maxNesting, int maxRegexSize) {
+        if (maxVisitedNodes < 0 || maxResultSize < 0 || maxDepth < 0 || maxNesting < 0 || maxRegexSize < 0) {
             throw new IllegalArgumentException("Limits must not be negative: maxVisitedNodes=" + maxVisitedNodes
-                    + ", maxResultSize=" + maxResultSize + ", maxDepth=" + maxDepth);
+                    + ", maxResultSize=" + maxResultSize + ", maxDepth=" + maxDepth + ", maxNesting=" + maxNesting
+                    + ", maxRegexSize=" + maxRegexSize);
         }
         this.maxVisitedNodes = maxVisitedNodes;
         this.maxResultSize = maxResultSize;
         this.maxDepth = maxDepth;
+        this.maxNesting = maxNesting;
+        this.maxRegexSize = maxRegexSize;
+    }
+
+    /**
+     * Returns these limits, overridden by the properties of {@link JsonPath} in {@code config}:
+     * {@link JsonPath#MAX_VISITED_NODES}, {@link JsonPath#MAX_RESULT_SIZE}, {@link JsonPath#MAX_DEPTH},
+     * {@link JsonPath#MAX_NESTING} and {@link JsonPath#MAX_REGEX_SIZE}. Other properties are ignored.
+     *
+     * @throws JsonException if one of these properties is not a non-negative integer, given as a
+     *     {@link Number} or a decimal {@link String}, in the range of the limit
+     */
+    Limits with(Map<String, ?> config) {
+        return new Limits(
+                property(config, JsonPath.MAX_VISITED_NODES, maxVisitedNodes, Long.MAX_VALUE),
+                (int) property(config, JsonPath.MAX_RESULT_SIZE, maxResultSize, Integer.MAX_VALUE),
+                (int) property(config, JsonPath.MAX_DEPTH, maxDepth, Integer.MAX_VALUE),
+                (int) property(config, JsonPath.MAX_NESTING, maxNesting, Integer.MAX_VALUE),
+                (int) property(config, JsonPath.MAX_REGEX_SIZE, maxRegexSize, Integer.MAX_VALUE));
+    }
+
+    private static long property(Map<String, ?> config, String name, long defaultValue, long max) {
+        Object value = config.get(name);
+        if (value == null) {
+            return defaultValue;
+        }
+        long result;
+        if (value instanceof Long || value instanceof Integer || value instanceof Short || value instanceof Byte) {
+            result = ((Number) value).longValue();
+        } else if (value instanceof Number || value instanceof String) {
+            try {
+                result = new BigDecimal(value.toString().trim()).longValueExact();
+            } catch (ArithmeticException | NumberFormatException e) {
+                throw invalid(name, value);
+            }
+        } else {
+            throw invalid(name, value);
+        }
+        if (result < 0) {
+            throw invalid(name, value);
+        }
+        // Larger values than a limit can hold mean "no limit".
+        return Math.min(result, max);
+    }
+
+    private static JsonException invalid(String name, Object value) {
+        return new JsonException(JsonPathMessages.get("path.config.invalid", name, String.valueOf(value)));
     }
 }

@@ -63,8 +63,11 @@ public final class IRegexp {
      */
     static final boolean CARET_AND_DOLLAR_ARE_ANCHORS = true;
 
-    /** Maximum number of automaton instructions per expression. */
-    static final int MAX_PROGRAM_SIZE = 20_000;
+    /**
+     * Default maximum number of automaton instructions per expression; the unit of
+     * {@code jakarta.json.JsonPath.maxRegexSize} in Parsson.
+     */
+    public static final int MAX_PROGRAM_SIZE = 20_000;
 
     /** Maximum nesting of groups, to bound recursion on hostile input. */
     static final int MAX_NESTING = 100;
@@ -106,9 +109,21 @@ public final class IRegexp {
      * @return the compiled expression, or empty if {@code regexp} is not a valid I-Regexp or exceeds a limit
      */
     public static Optional<IRegexp> compile(String regexp) {
+        return compile(regexp, MAX_PROGRAM_SIZE);
+    }
+
+    /**
+     * Returns the compiled expression, or empty if {@code regexp} is not a valid I-Regexp or its automaton
+     * would have more than {@code maxProgramSize} instructions.
+     *
+     * @param regexp the expression
+     * @param maxProgramSize the maximum number of automaton instructions
+     * @return the compiled expression, or empty if {@code regexp} is not a valid I-Regexp or exceeds a limit
+     */
+    public static Optional<IRegexp> compile(String regexp, int maxProgramSize) {
         IRegexp compiled;
         try {
-            compiled = new IRegexp(RegexProgram.compile(new RegexParser(regexp).parse()));
+            compiled = new IRegexp(RegexProgram.compile(new RegexParser(regexp).parse(), maxProgramSize));
         } catch (InvalidRegexp e) {
             return Optional.empty();
         }
