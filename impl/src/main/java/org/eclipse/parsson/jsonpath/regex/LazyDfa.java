@@ -53,12 +53,15 @@ final class LazyDfa {
     private final boolean search;
     private final int generation;
     private final AtomicLong bytes = new AtomicLong();
+    /** The memory budget shared with other automata. */
+    private final DfaBudget budget;
     private final Map<StateKey, State> states = new ConcurrentHashMap<>();
     /** Null if the budget was exhausted before the start state could be cached. */
     private final State start;
 
-    LazyDfa(RegexProgram program, boolean search, int generation) {
+    LazyDfa(RegexProgram program, boolean search, int generation, DfaBudget budget) {
         this.program = program;
+        this.budget = budget;
         this.search = search;
         this.generation = generation;
         this.start = closureState(null, -1, true, new Scratch(program));
@@ -69,14 +72,14 @@ final class LazyDfa {
      * discarded; if all automata together are full, discards them all and returns false.
      */
     private boolean reserve(long cost) {
-        if (generation != IRegexp.dfaGeneration()) {
+        if (generation != budget.generation()) {
             return false;
         }
         if (bytes.addAndGet(cost) > IRegexp.MAX_DFA_BYTES_PER_AUTOMATON) {
             bytes.addAndGet(-cost);
             return false;
         }
-        if (!IRegexp.reserveShared(cost, generation)) {
+        if (!budget.reserve(cost, generation)) {
             bytes.addAndGet(-cost);
             return false;
         }
@@ -85,7 +88,7 @@ final class LazyDfa {
 
     private void release(long cost) {
         bytes.addAndGet(-cost);
-        IRegexp.releaseShared(cost, generation);
+        budget.release(cost, generation);
     }
 
     /**
