@@ -65,7 +65,8 @@ import org.eclipse.parsson.jsonpath.regex.IRegexp;
  * by the query.
  *
  * <p>Every node visit counts against {@link Limits#maxVisitedNodes}: each node a selector produces, each node
- * a descendant segment walks through and each node a filter tests. A query that exceeds a limit fails with a
+ * a descendant segment walks through and each node a filter tests. Each such node must also be within
+ * {@link Limits#maxDepth}, whichever selector reaches it. A query that exceeds a limit fails with a
  * {@link JsonException}; it never returns a partial result.
  */
 final class Evaluator {
@@ -175,7 +176,7 @@ final class Evaluator {
         }
     }
 
-    /** Fails for the children of a node at the depth limit. */
+    /** Fails for the children of a node at the depth limit; called only when a child is reached. */
     private void checkDepth(NodeImpl node) {
         if (node.depth() + depthOffset >= maxDepth) {
             throw tooDeep(maxDepth);
@@ -292,16 +293,20 @@ final class Evaluator {
         JsonValue value = node.getValue();
         ValueType kind = value.getValueType();
         if (kind == ValueType.OBJECT) {
-            checkDepth(node);
             JsonObject object = (JsonObject) value;
+            if (!object.isEmpty()) {
+                checkDepth(node);
+            }
             visit(object.size());
             for (Map.Entry<String, JsonValue> member : object.entrySet()) {
                 stack.push(node.child(member.getValue(), member.getKey()));
             }
         } else if (kind == ValueType.ARRAY) {
-            checkDepth(node);
             JsonArray array = (JsonArray) value;
             int size = array.size();
+            if (size > 0) {
+                checkDepth(node);
+            }
             visit(size);
             for (int i = 0; i < size; i++) {
                 stack.push(node.child(array.get(i), i));
@@ -347,6 +352,7 @@ final class Evaluator {
                 String name = ((Name) selector).name;
                 JsonValue member = ((JsonObject) value).get(name);
                 if (member != null) {
+                    checkDepth(node);
                     visit(1);
                     return apply(segments, next, node.child(member, name), sink);
                 }
@@ -363,6 +369,7 @@ final class Evaluator {
             long normalized = index >= 0 ? index : size + index;
             if (normalized >= 0 && normalized < size) {
                 int i = (int) normalized;
+                checkDepth(node);
                 visit(1);
                 return apply(segments, next, node.child(array.get(i), i), sink);
             }
@@ -379,8 +386,10 @@ final class Evaluator {
         JsonValue value = node.getValue();
         ValueType kind = value.getValueType();
         if (kind == ValueType.OBJECT) {
-            checkDepth(node);
             JsonObject object = (JsonObject) value;
+            if (!object.isEmpty()) {
+                checkDepth(node);
+            }
             visit(object.size());
             for (Map.Entry<String, JsonValue> member : object.entrySet()) {
                 if (!selectChild(node.child(member.getValue(), member.getKey()), filter, segments, next, sink)) {
@@ -388,9 +397,11 @@ final class Evaluator {
                 }
             }
         } else if (kind == ValueType.ARRAY) {
-            checkDepth(node);
             JsonArray array = (JsonArray) value;
             int size = array.size();
+            if (size > 0) {
+                checkDepth(node);
+            }
             visit(size);
             for (int i = 0; i < size; i++) {
                 if (!selectChild(node.child(array.get(i), i), filter, segments, next, sink)) {
@@ -439,6 +450,7 @@ final class Evaluator {
     }
 
     private boolean sliced(NodeImpl node, JsonArray array, int index, List<Segment> segments, int next, Sink sink) {
+        checkDepth(node);
         visit(1);
         return apply(segments, next, node.child(array.get(index), index), sink);
     }

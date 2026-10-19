@@ -73,8 +73,9 @@ public final class JsonPathImpl implements JsonPath {
     /**
      * Parses a query with the limits given as defaults, overridden by the {@link JsonPath} configuration
      * properties in {@code config}: {@link JsonPath#MAX_VISITED_NODES}, {@link JsonPath#MAX_RESULT_SIZE},
-     * {@link JsonPath#MAX_DEPTH}, {@link JsonPath#MAX_NESTING} and {@link JsonPath#MAX_REGEX_SIZE} (automaton
-     * instructions, default 20,000). Other properties are ignored.
+     * {@link JsonPath#MAX_DEPTH}, {@link JsonPath#MAX_BUFFERED_NODES} (default 10,000,000),
+     * {@link JsonPath#MAX_NESTING} and {@link JsonPath#MAX_REGEX_SIZE} (automaton instructions, default 20,000).
+     * Other properties are ignored.
      *
      * @param query the query string
      * @param config the configuration properties

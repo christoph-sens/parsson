@@ -21,7 +21,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import jakarta.json.JsonArray;
 import jakarta.json.JsonArrayBuilder;
+import jakarta.json.JsonException;
+import jakarta.json.JsonObject;
 import jakarta.json.JsonObjectBuilder;
 import jakarta.json.JsonPath;
 import jakarta.json.JsonPointer;
@@ -70,7 +73,12 @@ import org.eclipse.parsson.jsonpath.Ast.Wildcard;
  *
  * <p>Nodes are processed with an explicit stack of frames, so deep documents cannot overflow the call stack.
  * Every node the matcher reaches and every selection counts against the visited-nodes limit, as do the visits
- * of filter tests.
+ * of filter tests; a reached node deeper than the depth limit fails.
+ *
+ * <p>The nodes of values the matcher holds because it cannot report or decide them yet count against
+ * {@link Limits#maxBufferedNodes}: queued matches and children that filters test, but not values the caller
+ * requested. The count is kept per outermost held value and released when every held value inside it has
+ * been reported or decided, so a node may be counted a little longer than it is needed, never less.
  */
 final class StreamingMatcher implements JsonPath.Matcher {
 
@@ -320,6 +328,16 @@ final class StreamingMatcher implements JsonPath.Matcher {
         Entry entry;
         /** Whether the value of this node is built. */
         boolean capture;
+        /** Whether this node is, or is inside, a value the caller requested. */
+        boolean requested;
+        /** The outermost held value this node is in, or {@code null}; see {@link #buffered}. */
+        Frame heldRoot;
+        /** Reasons this node is held: a queued match, a filter that tests it. */
+        int holds;
+        /** For an outermost held value: the held values inside it, itself included, not yet released. */
+        int refs;
+        /** For an outermost held value: the nodes counted for it. */
+        long nodes;
 
         // While the matcher reads inside the node:
         boolean array;
@@ -342,6 +360,7 @@ final class StreamingMatcher implements JsonPath.Matcher {
 
     /** A selected node, in the queue until its decisions are known and its value is complete. */
     private static final class Entry {
+        final Frame node;
         final NodeImpl path;
         final JsonLocation location;
         final Item[] routes;
@@ -349,8 +368,9 @@ final class StreamingMatcher implements JsonPath.Matcher {
         boolean complete;
         long count;
 
-        Entry(NodeImpl path, JsonLocation location, Item[] routes) {
-            this.path = path;
+        Entry(Frame node, JsonLocation location, Item[] routes) {
+            this.node = node;
+            this.path = node.path;
             this.location = location;
             this.routes = routes;
         }
@@ -411,6 +431,9 @@ final class StreamingMatcher implements JsonPath.Matcher {
     private final List<Segment> segments;
     private final int n;
     private final int maxDepth;
+    private final long maxBufferedNodes;
+    /** Nodes of the values the matcher holds, counted per outermost held value. */
+    private long buffered;
     /** Tests filters and counts all visits. */
     private final Evaluator evaluator;
 
@@ -431,6 +454,7 @@ final class StreamingMatcher implements JsonPath.Matcher {
         this.segments = query.segments;
         this.n = segments.size();
         this.maxDepth = limits.maxDepth;
+        this.maxBufferedNodes = limits.maxBufferedNodes;
         this.evaluator = new Evaluator(JsonValue.NULL, provider, limits);
     }
 
@@ -490,12 +514,18 @@ final class StreamingMatcher implements JsonPath.Matcher {
             Frame node = open;
             open = null;
             node.capture = true;
+            node.requested = true;
             proceed(node);
             while (!entry.complete) {
                 step();
             }
         }
         return entry.value;
+    }
+
+    /** Nodes of the values held now; for tests. */
+    long bufferedNodes() {
+        return buffered;
     }
 
     private Entry currentEntry() {
@@ -517,6 +547,7 @@ final class StreamingMatcher implements JsonPath.Matcher {
                 return null;
             }
             queue.poll();
+            release(head.node);
             if (count > 0) {
                 head.count = count;
                 return head;
@@ -568,6 +599,9 @@ final class StreamingMatcher implements JsonPath.Matcher {
             node.items = childItems(parent, node, name, -1);
         }
         evaluator.visitNodes(1);
+        if (node.items.length > 0 && node.path.depth() > maxDepth) {
+            throw Evaluator.tooDeep(maxDepth);
+        }
 
         boolean insideCapture = parent != null && parent.capture;
         List<Item> routes = null;
@@ -582,7 +616,7 @@ final class StreamingMatcher implements JsonPath.Matcher {
             }
         }
         if (routes != null) {
-            Entry entry = new Entry(node.path, new Location(parser.getLocation()), routes.toArray(new Item[0]));
+            Entry entry = new Entry(node, new Location(parser.getLocation()), routes.toArray(new Item[0]));
             node.entry = entry;
             if (certain && !insideCapture && queue.isEmpty() && node.filters == null) {
                 // Nothing before it waits and nothing decides it later: report it with the parser right here.
@@ -594,8 +628,73 @@ final class StreamingMatcher implements JsonPath.Matcher {
             queue.add(entry);
         }
         node.capture = insideCapture || node.entry != null || node.filters != null;
+        hold(node);
         proceed(node);
         return false;
+    }
+
+    /** Registers the reasons the matcher holds a node's value, and the outermost held value it is in. */
+    private static void hold(Frame node) {
+        Frame parent = node.parent;
+        node.requested = parent != null && parent.requested;
+        Frame root = parent != null ? parent.heldRoot : null;
+        if (!node.requested) {
+            node.holds = (node.entry != null ? 1 : 0) + (node.filters != null ? 1 : 0);
+        }
+        if (node.holds > 0) {
+            if (root == null) {
+                root = node;
+            }
+            root.refs++;
+        }
+        node.heldRoot = root;
+    }
+
+    /** Releases one reason to hold a node; the nodes of its outermost held value once nothing in it is held. */
+    private void release(Frame node) {
+        if (node.holds == 0) {
+            return;
+        }
+        if (--node.holds == 0) {
+            Frame root = node.heldRoot;
+            if (--root.refs == 0) {
+                buffered -= root.nodes;
+            }
+        }
+    }
+
+    /** Counts nodes built into a held value against the limit. */
+    private void buffer(Frame node, long count) {
+        Frame root = node.heldRoot;
+        if (root == null) {
+            return;
+        }
+        root.nodes += count;
+        buffered += count;
+        if (buffered > maxBufferedNodes) {
+            throw new JsonException(JsonPathMessages.get("path.limit.buffered", String.valueOf(maxBufferedNodes)));
+        }
+    }
+
+    /** The number of nodes of a value. */
+    private static long size(JsonValue value) {
+        long count = 0;
+        ArrayDeque<JsonValue> stack = new ArrayDeque<>();
+        stack.push(value);
+        while (!stack.isEmpty()) {
+            JsonValue v = stack.pop();
+            count++;
+            if (v instanceof JsonObject) {
+                for (JsonValue member : ((JsonObject) v).values()) {
+                    stack.push(member);
+                }
+            } else if (v instanceof JsonArray) {
+                for (JsonValue element : (JsonArray) v) {
+                    stack.push(element);
+                }
+            }
+        }
+        return count;
     }
 
     /**
@@ -605,10 +704,19 @@ final class StreamingMatcher implements JsonPath.Matcher {
     private void proceed(Frame node) {
         Event event = node.event;
         if (event != Event.START_OBJECT && event != Event.START_ARRAY) {
-            complete(node, node.capture ? parser.getValue() : null);
+            if (node.capture) {
+                buffer(node, 1);
+                complete(node, parser.getValue());
+            } else {
+                complete(node, null);
+            }
         } else if (!live(node.items)) {
             if (node.capture) {
-                complete(node, parser.getValue());
+                JsonValue value = parser.getValue();
+                if (node.heldRoot != null) {
+                    buffer(node, size(value));
+                }
+                complete(node, value);
             } else {
                 if (event == Event.START_OBJECT) {
                     parser.skipObject();
@@ -618,11 +726,9 @@ final class StreamingMatcher implements JsonPath.Matcher {
                 complete(node, null);
             }
         } else {
-            if (node.path.depth() >= maxDepth) {
-                throw Evaluator.tooDeep(maxDepth);
-            }
             node.array = event == Event.START_ARRAY;
             if (node.capture) {
+                buffer(node, 1);
                 if (node.array) {
                     node.arrayBuilder = provider.createArrayBuilder();
                 } else {
@@ -662,6 +768,7 @@ final class StreamingMatcher implements JsonPath.Matcher {
             for (FilterDecision decision : node.filters) {
                 decision.state = evaluator.test(decision.filter.expr, value, depth) ? TRUE : FALSE;
             }
+            release(node);
         }
         if (node.entry != null) {
             node.entry.value = value;
