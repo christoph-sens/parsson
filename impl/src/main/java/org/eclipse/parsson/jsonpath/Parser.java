@@ -60,20 +60,26 @@ final class Parser {
     /** Largest integer allowed in index and slice selectors: 2^53 - 1 (I-JSON range). */
     private static final long MAX_INT = (1L << 53) - 1;
 
-    /** Maximum nesting of filters, parentheses and function calls, to bound recursion on hostile input. */
+    /**
+     * Default maximum nesting of filters, parentheses and function calls, to bound recursion on hostile input.
+     */
     static final int MAX_NESTING = 64;
 
     private final String src;
     private final JsonProvider provider;
+    private final int maxNesting;
+    private final int maxRegexSize;
     private int pos;
     private int nesting;
 
     /** Start position of every test expression, so that type errors point at the operand. */
     private final IdentityHashMap<Test, Integer> testPositions = new IdentityHashMap<>();
 
-    private Parser(String src, JsonProvider provider) {
+    private Parser(String src, JsonProvider provider, int maxNesting, int maxRegexSize) {
         this.src = src;
         this.provider = provider;
+        this.maxNesting = maxNesting;
+        this.maxRegexSize = maxRegexSize;
     }
 
     /**
@@ -85,7 +91,20 @@ final class Parser {
      * @throws JsonException if the query is not well-formed and valid
      */
     static Query parse(String query, JsonProvider provider) {
-        Parser parser = new Parser(query, provider);
+        return parse(query, provider, Limits.DEFAULT);
+    }
+
+    /**
+     * Parses a query with the nesting and regular expression limits of {@code limits}.
+     *
+     * @param query the query string
+     * @param provider creates the values of string and number literals
+     * @param limits the limits {@link Limits#maxNesting} and {@link Limits#maxRegexSize}
+     * @return the syntax tree
+     * @throws JsonException if the query is not well-formed and valid, or nested deeper than the limit
+     */
+    static Query parse(String query, JsonProvider provider, Limits limits) {
+        Parser parser = new Parser(query, provider, limits.maxNesting, limits.maxRegexSize);
         if (parser.peek() != '$') {
             throw parser.error("path.syntax.root");
         }
@@ -358,8 +377,8 @@ final class Parser {
     }
 
     private void enter() {
-        if (++nesting > MAX_NESTING) {
-            throw error("path.syntax.nesting", pos, String.valueOf(MAX_NESTING));
+        if (++nesting > maxNesting) {
+            throw error("path.syntax.nesting", pos, String.valueOf(maxNesting));
         }
     }
 
@@ -441,7 +460,7 @@ final class Parser {
         for (int i = 0; i < arguments.size(); i++) {
             checkArgument(arguments.get(i), function.parameter(i), positions.get(i));
         }
-        return new FunctionCall(function, unmodifiable(arguments));
+        return new FunctionCall(function, unmodifiable(arguments), maxRegexSize);
     }
 
     /** An argument is parsed as a logical expression; a bare operand is unwrapped. */

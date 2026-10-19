@@ -33,23 +33,26 @@ final class Patterns {
     private final String literal;
     private final Optional<IRegexp> literalRegexp;
     private final RegexCache cache;
+    private final int maxRegexSize;
 
     /**
      * Creates the patterns of a call.
      *
      * @param literal the pattern if it is a string literal, otherwise {@code null}
+     * @param maxRegexSize the maximum number of automaton instructions of a pattern
      */
-    Patterns(String literal) {
+    Patterns(String literal, int maxRegexSize) {
         this.literal = literal;
-        this.literalRegexp = literal != null ? IRegexp.compile(literal) : Optional.<IRegexp>empty();
-        this.cache = literal != null ? null : new RegexCache();
+        this.maxRegexSize = maxRegexSize;
+        this.literalRegexp = literal != null ? IRegexp.compile(literal, maxRegexSize) : Optional.<IRegexp>empty();
+        this.cache = literal != null ? null : new RegexCache(maxRegexSize);
     }
 
     /** Returns the compiled pattern, or empty if {@code pattern} is not a valid I-Regexp. */
     Optional<IRegexp> get(String pattern) {
         if (cache == null) {
             // A literal pattern: the argument is always this literal.
-            return pattern.equals(literal) ? literalRegexp : IRegexp.compile(pattern);
+            return pattern.equals(literal) ? literalRegexp : IRegexp.compile(pattern, maxRegexSize);
         }
         return cache.get(pattern);
     }

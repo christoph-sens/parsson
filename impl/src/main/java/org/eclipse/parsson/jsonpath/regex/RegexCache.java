@@ -34,7 +34,7 @@ public final class RegexCache {
     /** Maximum number of expressions per call. */
     static final int MAX_ENTRIES = 64;
 
-    /** Maximum number of automaton instructions of the expressions per call. */
+    /** Maximum number of automaton instructions of the expressions per call, by default. */
     static final long MAX_INSTRUCTIONS = 2L * IRegexp.MAX_PROGRAM_SIZE;
 
     private final Map<String, Optional<IRegexp>> entries = new ConcurrentHashMap<>();
@@ -42,8 +42,26 @@ public final class RegexCache {
     /** Instructions of the expressions in {@link #entries}; guarded by the lock. */
     private long instructions;
 
+    /** Maximum number of automaton instructions per expression. */
+    private final int maxProgramSize;
+
+    /** Maximum number of automaton instructions of the cached expressions together. */
+    private final long maxInstructions;
+
     /** Creates an empty cache, one per {@code match()} or {@code search()} call of a query. */
     public RegexCache() {
+        this(IRegexp.MAX_PROGRAM_SIZE);
+    }
+
+    /**
+     * Creates an empty cache for expressions of at most {@code maxProgramSize} instructions; together they
+     * may have twice as many.
+     *
+     * @param maxProgramSize the maximum number of automaton instructions per expression
+     */
+    public RegexCache(int maxProgramSize) {
+        this.maxProgramSize = maxProgramSize;
+        this.maxInstructions = 2L * maxProgramSize;
     }
 
     /**
@@ -57,10 +75,10 @@ public final class RegexCache {
         if (cached != null) {
             return cached;
         }
-        Optional<IRegexp> compiled = IRegexp.compile(regexp);
+        Optional<IRegexp> compiled = IRegexp.compile(regexp, maxProgramSize);
         long weight = compiled.map(r -> (long) r.programSize()).orElse(1L);
         synchronized (this) {
-            if (entries.size() >= MAX_ENTRIES || instructions + weight > MAX_INSTRUCTIONS) {
+            if (entries.size() >= MAX_ENTRIES || instructions + weight > maxInstructions) {
                 for (Optional<IRegexp> evicted : entries.values()) {
                     evicted.ifPresent(IRegexp::retire);
                 }

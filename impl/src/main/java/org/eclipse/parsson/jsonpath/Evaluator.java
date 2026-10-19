@@ -80,6 +80,9 @@ final class Evaluator {
     private final int maxDepth;
     private long visitedNodes;
 
+    /** Depth of the root of the current filter test in the query argument, for {@link #test(Expr, JsonValue, int)}. */
+    private int depthOffset;
+
     /** Results of absolute queries inside filters, created on first use. */
     private IdentityHashMap<Query, List<NodeImpl>> absoluteNodes;
 
@@ -130,6 +133,39 @@ final class Evaluator {
         }
     }
 
+    /**
+     * Counts node visits of a streaming run against the limit; the count may be large, as for nodes selected
+     * many times by nested descendant segments.
+     */
+    void visitNodes(long count) {
+        long before = visitedNodes;
+        long after = before + count;
+        if (after < before) {
+            after = Long.MAX_VALUE;
+        }
+        visitedNodes = after;
+        if (after > maxVisitedNodes || (before >>> INTERRUPT_CHECK_SHIFT) != (after >>> INTERRUPT_CHECK_SHIFT)) {
+            checkLimits(after);
+        }
+    }
+
+    /**
+     * Tests a filter expression on a candidate of a streaming run. The expression contains only relative
+     * queries, so the candidate's value is all it needs.
+     *
+     * @param filter the expression of a filter selector
+     * @param candidate the value of the child the filter tests
+     * @param depth the depth of the candidate in the query argument, for the depth limit
+     */
+    boolean test(Expr filter, JsonValue candidate, int depth) {
+        depthOffset = depth;
+        try {
+            return test(filter, NodeImpl.root(provider, candidate));
+        } finally {
+            depthOffset = 0;
+        }
+    }
+
     private void checkLimits(long visited) {
         if (visited > maxVisitedNodes) {
             throw new JsonException(JsonPathMessages.get("path.limit.visited", String.valueOf(maxVisitedNodes)));
@@ -141,7 +177,7 @@ final class Evaluator {
 
     /** Fails for the children of a node at the depth limit. */
     private void checkDepth(NodeImpl node) {
-        if (node.depth() >= maxDepth) {
+        if (node.depth() + depthOffset >= maxDepth) {
             throw tooDeep(maxDepth);
         }
     }

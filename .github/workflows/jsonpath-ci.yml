@@ -47,12 +47,13 @@ jobs:
           cache: maven
       - name: Build and install JSON-P API 2.2.0-SNAPSHOT
         run: mvn -B -V -U -C -f jsonp-api/api/pom.xml -Poss-release install -DskipTests -Dgpg.skip=true
+      # No `cache: maven` here: restoring the cache a second time would overwrite the API just installed
+      # with the 2.2.0-SNAPSHOT of an earlier run. The first setup-java restores and saves the cache.
       - name: Set up JDK ${{ matrix.java_version }} (build and test JVM)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ matrix.java_version }}
-          cache: maven
       - name: Remember test JDK
         run: echo "TEST_JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
       - name: Build Parsson
