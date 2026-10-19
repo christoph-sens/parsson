@@ -166,7 +166,7 @@
                                 <Specification-Vendor>Eclipse Foundation</Specification-Vendor>
                                 <Specification-Version>${spec.specification.version}</Specification-Version>
                                 <DynamicImport-Package>*</DynamicImport-Package>
-                                <Export-Package>!org.eclipse.parsson,*</Export-Package>
+                                <Export-Package>!org.eclipse.parsson,!org.eclipse.parsson.jsonpath,!org.eclipse.parsson.jsonpath.*,*</Export-Package>
                                 <Import-Package>
                                     org.glassfish.hk2.osgiresourcelocator;resolution:=optional,
                                     *

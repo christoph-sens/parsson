@@ -33,8 +33,46 @@
     <name>Eclipse Parsson</name>
     <description>Jakarta JSON Processing provider</description>
 
+    <properties>
+        <!--
+            JSONPath Compliance Test Suite (https://github.com/jsonpath-standard/jsonpath-compliance-test-suite,
+            BSD-2-Clause), downloaded for the tests at a fixed commit and checked against its SHA-256.
+        -->
+        <jsonpath.cts.commit>20ebdcce5008c8a777ee9c80ad853ecf606950b5</jsonpath.cts.commit>
+        <jsonpath.cts.sha256>f4ab5e3d3c17b40bf59cb0fa94425790b1401eb30c35a54902a119c65c851d36</jsonpath.cts.sha256>
+        <jsonpath.cts.dir>${project.build.directory}/jsonpath-cts</jsonpath.cts.dir>
+    </properties>
+
     <build>
         <plugins>
+            <plugin>
+                <groupId>com.googlecode.maven-download-plugin</groupId>
+                <artifactId>download-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>jsonpath-compliance-test-suite</id>
+                        <phase>generate-test-resources</phase>
+                        <goals>
+                            <goal>wget</goal>
+                        </goals>
+                        <configuration>
+                            <url>https://raw.githubusercontent.com/jsonpath-standard/jsonpath-compliance-test-suite/${jsonpath.cts.commit}/cts.json</url>
+                            <outputDirectory>${jsonpath.cts.dir}</outputDirectory>
+                            <outputFileName>cts.json</outputFileName>
+                            <sha256>${jsonpath.cts.sha256}</sha256>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <jsonpath.cts>${jsonpath.cts.dir}/cts.json</jsonpath.cts>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.felix</groupId>
                 <artifactId>maven-bundle-plugin</artifactId>

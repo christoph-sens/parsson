@@ -96,7 +96,8 @@
         <spotbugs.threshold>Low</spotbugs.threshold>
         <spotbugs.version>4.8.3.1</spotbugs.version>
 
-        <jakarta.json-api.version>2.1.3</jakarta.json-api.version>
+        <!-- JSONPath (jsonpath branch): JSON-P API 2.2 from christoph-sens/jsonp-api, branch jsonpath -->
+        <jakarta.json-api.version>2.2.0-SNAPSHOT</jakarta.json-api.version>
 
         <jakarta.annotation-api.version>3.0.0</jakarta.annotation-api.version>
         <jakarta.xml.bind-api.version>4.0.2</jakarta.xml.bind-api.version>
@@ -369,6 +370,11 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
                     <version>3.2.5</version>
+                </plugin>
+                <plugin>
+                    <groupId>com.googlecode.maven-download-plugin</groupId>
+                    <artifactId>download-maven-plugin</artifactId>
+                    <version>1.10.0</version>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
