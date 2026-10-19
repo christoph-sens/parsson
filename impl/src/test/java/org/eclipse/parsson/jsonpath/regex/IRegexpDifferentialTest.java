@@ -55,12 +55,12 @@ class IRegexpDifferentialTest {
             StringBuilder java = new StringBuilder();
             if (random.nextInt(8) == 0) {
                 iregexp.append('^');
-                java.append("\\A");
+                java.append(IRegexpTest.anchorInJava(true));
             }
             alternation(random, 3, iregexp, java);
             if (random.nextInt(8) == 0) {
                 iregexp.append('$');
-                java.append("\\z");
+                java.append(IRegexpTest.anchorInJava(false));
             }
             IRegexp ours = IRegexp.compile(iregexp.toString())
                     .orElseThrow(() -> new AssertionError("rejected valid I-Regexp " + iregexp));
@@ -98,7 +98,7 @@ class IRegexpDifferentialTest {
             case 1:
                 int c = ALPHABET[random.nextInt(ALPHABET.length)];
                 if (c == '$') {
-                    // '$' cannot be escaped in I-Regexp, and a bare '$' is an anchor here: use a class.
+                    // '$' cannot be escaped in I-Regexp, and a bare '$' may be an anchor: use a class.
                     iregexp.append("[$]");
                 } else if (isMeta(c)) {
                     iregexp.append('\\').appendCodePoint(c);

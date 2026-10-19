@@ -53,6 +53,16 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class IRegexp {
 
+    /**
+     * Whether {@code ^} and {@code $} outside character classes are anchors (start and end of the input)
+     * rather than ordinary characters. RFC 9485 lists them as ordinary characters, as one of its authors
+     * confirmed in treetrail/treetrail#46; the JSONPath Compliance Test Suite at the commit the tests pin
+     * (20ebdcc, "explicit caret" and "explicit dollar") expects anchors, and the TCK takes its cases from it.
+     * This is the single place to flip when the test suite changes (jsonpath-compliance-test-suite#122);
+     * open point Q5 of the design document.
+     */
+    static final boolean CARET_AND_DOLLAR_ARE_ANCHORS = true;
+
     /** Maximum number of automaton instructions per expression. */
     static final int MAX_PROGRAM_SIZE = 20_000;
 

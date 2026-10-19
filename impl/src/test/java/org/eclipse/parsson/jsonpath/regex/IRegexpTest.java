@@ -107,9 +107,6 @@ class IRegexpTest {
                 "a{2,}  ; aaaa  ; true",
                 "(ab|cd){2} ; abcd ; true",
                 "x*     ; ''    ; true",
-                // Regular-language semantics: the first pass matches the empty string at '^'.
-                // java.util.regex answers false here; RE2 and Rust's regex answer true.
-                "(^|a){2} ; a  ; true",
             })
     void matchesWholeInput(String regexp, String input, boolean expected) {
         String subject = input.equals("''") ? "" : input.replace("\\n", "\n");
@@ -140,8 +137,34 @@ class IRegexpTest {
 
         assertTrue(regexp.find("abbbc"));
         assertFalse(regexp.find("ac"));
-        assertFalse(IRegexp.compile("^b").get().find("ab"));
-        assertTrue(IRegexp.compile("b$").get().find("ab"));
+    }
+
+    /** {@code ^} and {@code $} follow {@link IRegexp#CARET_AND_DOLLAR_ARE_ANCHORS}. */
+    @Test
+    void caretAndDollarFollowTheAnchorSetting() {
+        IRegexp caret = IRegexp.compile("^ab").get();
+        IRegexp dollar = IRegexp.compile("ab$").get();
+        IRegexp emptyPass = IRegexp.compile("(^|a){2}").get();
+        if (IRegexp.CARET_AND_DOLLAR_ARE_ANCHORS) {
+            assertTrue(caret.matches("ab"));
+            assertTrue(caret.find("abc"));
+            assertFalse(caret.find("xab"));
+            assertTrue(dollar.matches("ab"));
+            assertTrue(dollar.find("xab"));
+            assertFalse(dollar.find("abc"));
+            // Regular-language semantics: the first pass matches the empty string at '^'.
+            // java.util.regex answers false here; RE2 and Rust's regex answer true.
+            assertTrue(emptyPass.matches("a"));
+        } else {
+            assertTrue(caret.matches("^ab"));
+            assertFalse(caret.matches("ab"));
+            assertTrue(caret.find("x^abc"));
+            assertTrue(dollar.matches("ab$"));
+            assertFalse(dollar.matches("ab"));
+            assertTrue(dollar.find("xab$x"));
+            assertFalse(emptyPass.matches("a"));
+            assertTrue(emptyPass.matches("^a"));
+        }
     }
 
     @Test
@@ -267,7 +290,7 @@ class IRegexpTest {
                 case 5:
                     boolean begin = random.nextBoolean();
                     iregexp.append(begin ? "^" : "$");
-                    java.append(begin ? "\\A" : "\\z");
+                    java.append(anchorInJava(begin));
                     continue;
                 default:
                     iregexp.append('(');
@@ -286,6 +309,14 @@ class IRegexpTest {
             iregexp.append(quantifier);
             java.append(quantifier);
         }
+    }
+
+    /** The java.util.regex equivalent of I-Regexp's {@code ^} or {@code $}. */
+    static String anchorInJava(boolean begin) {
+        if (IRegexp.CARET_AND_DOLLAR_ARE_ANCHORS) {
+            return begin ? "\\A" : "\\z";
+        }
+        return begin ? "\\^" : "\\$";
     }
 
     private static String randomInput(Random random) {

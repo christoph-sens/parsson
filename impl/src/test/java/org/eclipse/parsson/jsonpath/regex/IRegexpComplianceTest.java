@@ -34,6 +34,10 @@ import org.junit.jupiter.params.provider.MethodSource;
  * for each string the filter applies the function to, whether the test selects it (inverted for
  * {@code !match()} and {@code !search()}). Duplicates are left out, and so are the tests that never reach the
  * regex engine: invalid selectors and non-string arguments. The full selectors run in the TCK.
+ *
+ * <p>The "explicit caret" and "explicit dollar" cases expect {@code ^} and {@code $} to be anchors, as
+ * {@link IRegexp#CARET_AND_DOLLAR_ARE_ANCHORS} has it. When that constant flips because the test suite changes
+ * (jsonpath-compliance-test-suite#122), regenerate these cases from the new commit.
  */
 class IRegexpComplianceTest {
 
