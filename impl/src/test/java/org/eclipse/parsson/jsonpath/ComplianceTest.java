@@ -56,7 +56,7 @@ class ComplianceTest {
     }
 
     private static void run(ComplianceSuite.Case test) {
-        List<NodeImpl> nodes = new Evaluator(test.document, PROVIDER).run(Parser.parse(test.selector, PROVIDER));
+        List<NodeImpl> nodes = new Evaluator(test.document, PROVIDER, Limits.DEFAULT).run(Parser.parse(test.selector, PROVIDER));
         List<JsonValue> values = new ArrayList<>();
         List<String> paths = new ArrayList<>();
         for (NodeImpl node : nodes) {
@@ -79,7 +79,7 @@ class ComplianceTest {
             return false;
         }
         for (int i = 0; i < actual.size(); i++) {
-            if (!Values.jsonEquals(actual.get(i), expected.get(i))) {
+            if (!Values.jsonEquals(actual.get(i), expected.get(i), Integer.MAX_VALUE)) {
                 return false;
             }
         }

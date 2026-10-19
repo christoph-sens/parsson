@@ -42,31 +42,35 @@ final class Values {
     private Values() {
     }
 
-    /** Compares two values; {@code !=} is the negation of {@code ==}. */
-    static boolean compare(JsonValue left, ComparisonOp op, JsonValue right) {
+    /**
+     * Compares two values; {@code !=} is the negation of {@code ==}.
+     *
+     * @param maxDepth how deep arrays and objects are compared before the comparison fails
+     */
+    static boolean compare(JsonValue left, ComparisonOp op, JsonValue right, int maxDepth) {
         switch (op) {
             case EQ:
-                return equal(left, right);
+                return equal(left, right, maxDepth);
             case NE:
-                return !equal(left, right);
+                return !equal(left, right, maxDepth);
             case LT:
                 return less(left, right);
             case LE:
-                return lessOrEqual(left, right);
+                return lessOrEqual(left, right, maxDepth);
             case GT:
                 return less(right, left);
             case GE:
-                return lessOrEqual(right, left);
+                return lessOrEqual(right, left, maxDepth);
             default:
                 throw new IllegalStateException(op.name());
         }
     }
 
-    private static boolean equal(JsonValue a, JsonValue b) {
+    private static boolean equal(JsonValue a, JsonValue b, int maxDepth) {
         if (a == null || b == null) {
             return a == null && b == null;
         }
-        return jsonEquals(a, b);
+        return jsonEquals(a, b, maxDepth);
     }
 
     private static boolean less(JsonValue a, JsonValue b) {
@@ -85,7 +89,7 @@ final class Values {
     }
 
     /** {@code a < b || a == b}, comparing numbers and strings once. */
-    private static boolean lessOrEqual(JsonValue a, JsonValue b) {
+    private static boolean lessOrEqual(JsonValue a, JsonValue b, int maxDepth) {
         if (a != null && b != null) {
             ValueType ka = a.getValueType();
             ValueType kb = b.getValueType();
@@ -96,7 +100,7 @@ final class Values {
                 return compareCodePoints(((JsonString) a).getString(), ((JsonString) b).getString()) <= 0;
             }
         }
-        return equal(a, b);
+        return equal(a, b, maxDepth);
     }
 
     /** Compares strings by Unicode code points (UTF-16 order differs above U+FFFF). */
@@ -119,15 +123,17 @@ final class Values {
         return a.bigDecimalValue().compareTo(b.bigDecimalValue());
     }
 
-    /** A pair of values still to compare. */
+    /** A pair of values still to compare, at a depth below the compared values. */
     private static final class Pending {
 
         final JsonValue a;
         final JsonValue b;
+        final int depth;
 
-        Pending(JsonValue a, JsonValue b) {
+        Pending(JsonValue a, JsonValue b, int depth) {
             this.a = a;
             this.b = b;
+            this.depth = depth;
         }
     }
 
@@ -135,8 +141,11 @@ final class Values {
      * Whether two values are equal as JSON values, the semantics of {@code ==} in filters: numbers by value,
      * strings by content, arrays element by element, objects member by member regardless of order. Uses an
      * explicit stack, so that deep values cannot overflow the call stack.
+     *
+     * @param maxDepth how deep arrays and objects are compared before the comparison fails
+     * @throws jakarta.json.JsonException if the values are nested deeper than {@code maxDepth}
      */
-    static boolean jsonEquals(JsonValue a, JsonValue b) {
+    static boolean jsonEquals(JsonValue a, JsonValue b, int maxDepth) {
         ValueType kind = a.getValueType();
         if (kind != b.getValueType()) {
             return false;
@@ -146,7 +155,7 @@ final class Values {
             return scalarEqual(kind, a, b);
         }
         Deque<Pending> pending = new ArrayDeque<>();
-        pending.push(new Pending(a, b));
+        pending.push(new Pending(a, b, 0));
         while (!pending.isEmpty()) {
             Pending p = pending.pop();
             kind = p.a.getValueType();
@@ -160,8 +169,11 @@ final class Values {
                 if (size != ab.size()) {
                     return false;
                 }
+                if (size > 0 && p.depth >= maxDepth) {
+                    throw Evaluator.tooDeep(maxDepth);
+                }
                 for (int i = 0; i < size; i++) {
-                    pending.push(new Pending(aa.get(i), ab.get(i)));
+                    pending.push(new Pending(aa.get(i), ab.get(i), p.depth + 1));
                 }
             } else if (kind == ValueType.OBJECT) {
                 JsonObject oa = (JsonObject) p.a;
@@ -169,12 +181,15 @@ final class Values {
                 if (oa.size() != ob.size()) {
                     return false;
                 }
+                if (!oa.isEmpty() && p.depth >= maxDepth) {
+                    throw Evaluator.tooDeep(maxDepth);
+                }
                 for (Map.Entry<String, JsonValue> member : oa.entrySet()) {
                     JsonValue other = ob.get(member.getKey());
                     if (other == null) {
                         return false;
                     }
-                    pending.push(new Pending(member.getValue(), other));
+                    pending.push(new Pending(member.getValue(), other, p.depth + 1));
                 }
             } else if (!scalarEqual(kind, p.a, p.b)) {
                 return false;

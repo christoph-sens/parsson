@@ -54,7 +54,7 @@ class JsonPathImplTest {
     private static final JsonProvider PROVIDER = new JsonProviderImpl();
 
     private static List<JsonPath.Node> query(String query, JsonValue document) {
-        return JsonPathImpl.create(query, PROVIDER).query(document);
+        return JsonPathImpl.create(query, PROVIDER, Limits.DEFAULT).query(document);
     }
 
     private static List<String> pointers(String query, JsonValue document) {
@@ -120,13 +120,13 @@ class JsonPathImplTest {
 
     @Test
     void keepsTheQueryString() {
-        assertEquals("$.a[?@.b > 1]", JsonPathImpl.create("$.a[?@.b > 1]", PROVIDER).toString());
+        assertEquals("$.a[?@.b > 1]", JsonPathImpl.create("$.a[?@.b > 1]", PROVIDER, Limits.DEFAULT).toString());
     }
 
     @Test
     void rejectsNull() {
-        assertThrows(NullPointerException.class, () -> JsonPathImpl.create(null, PROVIDER));
-        assertThrows(NullPointerException.class, () -> JsonPathImpl.create("$", PROVIDER).query(null));
+        assertThrows(NullPointerException.class, () -> JsonPathImpl.create(null, PROVIDER, Limits.DEFAULT));
+        assertThrows(NullPointerException.class, () -> JsonPathImpl.create("$", PROVIDER, Limits.DEFAULT).query(null));
     }
 
     @Test

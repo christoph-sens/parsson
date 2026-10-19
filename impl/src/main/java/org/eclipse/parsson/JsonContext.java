@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2023, 2026 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2026 Contributors to the Eclipse Foundation. All rights reserved.
  *
  * This program and the accompanying materials are made available under the
  * terms of the Eclipse Public License v. 2.0, which is available at
@@ -46,6 +47,21 @@ final class JsonContext {
     /** Default maximum number of characters to parse from one document. */
     private static final int DEFAULT_MAX_PARSING_LIMIT = 15_000_000;
 
+    /** Default maximum number of node visits of one JSONPath query evaluation. */
+    private static final int DEFAULT_JSONPATH_MAX_VISITED_NODES = 100_000_000;
+
+    /** Default maximum number of nodes in a JSONPath query result: unlimited. */
+    private static final int DEFAULT_JSONPATH_MAX_RESULT_SIZE = Integer.MAX_VALUE;
+
+    /**
+     * Maximum number of node visits of one JSONPath query evaluation. Implementation specific; the names of
+     * JSON-P configuration properties for JSONPath are not defined yet (christoph-sens/jsonp-api#7).
+     */
+    static final String JSONPATH_MAX_VISITED_NODES = "org.eclipse.parsson.jsonpath.maxVisitedNodes";
+
+    /** Maximum number of nodes in a JSONPath query result. Implementation specific, see above. */
+    static final String JSONPATH_MAX_RESULT_SIZE = "org.eclipse.parsson.jsonpath.maxResultSize";
+
     /**
      * Custom char[] pool instance property. Can be set in properties {@code Map} only.
      */
@@ -64,6 +80,12 @@ final class JsonContext {
 
     // Maximum number of characters to parse from one document
     private final int maxParsingLimit;
+
+    // Maximum number of node visits of one JSONPath query evaluation
+    private final int jsonPathMaxVisitedNodes;
+
+    // Maximum number of nodes in a JSONPath query result
+    private final int jsonPathMaxResultSize;
 
     // Whether JSON pretty printing is enabled
     private final boolean prettyPrinting;
@@ -84,6 +106,9 @@ final class JsonContext {
         this.bigDecimalLengthLimit = getIntConfig(JsonConfig.MAX_BIGDECIMAL_LEN, config, DEFAULT_MAX_BIGDECIMAL_LEN);
         this.depthLimit = getIntConfig(JsonConfig.MAX_DEPTH, config, DEFAULT_MAX_DEPTH);
         this.maxParsingLimit = getIntConfig(JsonConfig.MAX_PARSING_LIMIT, config, DEFAULT_MAX_PARSING_LIMIT);
+        this.jsonPathMaxVisitedNodes =
+                getIntConfig(JSONPATH_MAX_VISITED_NODES, config, DEFAULT_JSONPATH_MAX_VISITED_NODES);
+        this.jsonPathMaxResultSize = getIntConfig(JSONPATH_MAX_RESULT_SIZE, config, DEFAULT_JSONPATH_MAX_RESULT_SIZE);
         this.prettyPrinting = getBooleanConfig(JsonGenerator.PRETTY_PRINTING, config);
         this.rejectDuplicateKeys = getBooleanConfig(JsonConfig.REJECT_DUPLICATE_KEYS, config);
         this.bufferPool = getBufferPool(config, defaultPool);
@@ -102,6 +127,9 @@ final class JsonContext {
         this.bigDecimalLengthLimit = getIntConfig(JsonConfig.MAX_BIGDECIMAL_LEN, config, DEFAULT_MAX_BIGDECIMAL_LEN);
         this.depthLimit = getIntConfig(JsonConfig.MAX_DEPTH, config, DEFAULT_MAX_DEPTH);
         this.maxParsingLimit = getIntConfig(JsonConfig.MAX_PARSING_LIMIT, config, DEFAULT_MAX_PARSING_LIMIT);
+        this.jsonPathMaxVisitedNodes =
+                getIntConfig(JSONPATH_MAX_VISITED_NODES, config, DEFAULT_JSONPATH_MAX_VISITED_NODES);
+        this.jsonPathMaxResultSize = getIntConfig(JSONPATH_MAX_RESULT_SIZE, config, DEFAULT_JSONPATH_MAX_RESULT_SIZE);
         this.prettyPrinting = getBooleanConfig(JsonGenerator.PRETTY_PRINTING, config);
         this.rejectDuplicateKeys = getBooleanConfig(JsonConfig.REJECT_DUPLICATE_KEYS, config);
         this.bufferPool = getBufferPool(config, defaultPool);
@@ -131,6 +159,14 @@ final class JsonContext {
 
     int maxParsingLimit() {
         return maxParsingLimit;
+    }
+
+    int jsonPathMaxVisitedNodes() {
+        return jsonPathMaxVisitedNodes;
+    }
+
+    int jsonPathMaxResultSize() {
+        return jsonPathMaxResultSize;
     }
 
     boolean prettyPrinting() {

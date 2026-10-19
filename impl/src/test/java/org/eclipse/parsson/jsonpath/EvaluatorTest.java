@@ -59,7 +59,11 @@ class EvaluatorTest {
     }
 
     static List<NodeImpl> query(String query, JsonValue document) {
-        return new Evaluator(document, PROVIDER).run(Parser.parse(query, PROVIDER));
+        return query(query, document, Limits.DEFAULT);
+    }
+
+    static List<NodeImpl> query(String query, JsonValue document, Limits limits) {
+        return new Evaluator(document, PROVIDER, limits).run(Parser.parse(query, PROVIDER));
     }
 
     static List<JsonValue> values(String query, JsonValue document) {
@@ -176,9 +180,10 @@ class EvaluatorTest {
     @Test
     void walksDeepDocumentsWithoutOverflowingTheStack() {
         JsonValue deep = nestedArrays(100_000);
+        Limits deepEnough = new Limits(Limits.DEFAULT_MAX_VISITED_NODES, Integer.MAX_VALUE, 200_000);
 
-        assertEquals(100_000, query("$..*", deep).size());
-        assertEquals(1, query("$..[?@ == 'x']", deep).size());
+        assertEquals(100_000, query("$..*", deep, deepEnough).size());
+        assertEquals(1, query("$..[?@ == 'x']", deep, deepEnough).size());
     }
 
     @Test
@@ -187,7 +192,8 @@ class EvaluatorTest {
                 .add(PROVIDER.createObjectBuilder().add("a", nestedArrays(100_000)).add("b", nestedArrays(100_000)))
                 .build();
 
-        assertEquals(1, query("$[?@.a == @.b]", doc).size());
+        assertEquals(1, query("$[?@.a == @.b]", doc,
+                new Limits(Limits.DEFAULT_MAX_VISITED_NODES, Integer.MAX_VALUE, 200_000)).size());
     }
 
     @Test

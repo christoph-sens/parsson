@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012, 2023 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2026 Contributors to the Eclipse Foundation. All rights reserved.
  *
  * This program and the accompanying materials are made available under the
  * terms of the Eclipse Public License v. 2.0, which is available at
@@ -18,6 +19,7 @@ package org.eclipse.parsson;
 
 import org.eclipse.parsson.api.BufferPool;
 import org.eclipse.parsson.api.JsonConfig;
+import org.eclipse.parsson.jsonpath.JsonPathImpl;
 
 import jakarta.json.*;
 import jakarta.json.stream.JsonGenerator;
@@ -155,6 +157,22 @@ public class JsonProviderImpl extends JsonProvider {
     @Override
     public JsonPointer createPointer(String jsonPointer) {
         return new JsonPointerImpl(jsonPointer, emptyContext);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Evaluation is limited, so that queries and documents from untrusted sources cannot exhaust time or
+     * memory; a query that exceeds a limit fails with a {@link JsonException}. The limits are read from system
+     * properties: {@code org.eclipse.parsson.jsonpath.maxVisitedNodes}, the node visits per evaluation (default
+     * 100,000,000), {@code org.eclipse.parsson.jsonpath.maxResultSize}, the nodes in a result (default
+     * unlimited), and {@link JsonConfig#MAX_DEPTH}, the depth to which a query walks into the query argument
+     * and compares values (default 1,000).</p>
+     */
+    @Override
+    public JsonPath createPath(String query) {
+        return JsonPathImpl.create(query, this, emptyContext.jsonPathMaxVisitedNodes(),
+                emptyContext.jsonPathMaxResultSize(), emptyContext.depthLimit());
     }
 
     @Override
