@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import jakarta.json.JsonArray;
+import jakarta.json.JsonException;
 import jakarta.json.JsonObject;
 import jakarta.json.JsonString;
 import jakarta.json.JsonValue;
@@ -62,11 +63,22 @@ import org.eclipse.parsson.jsonpath.regex.IRegexp;
  * <p>Descendant segments walk the document with an explicit stack, and {@code ==} compares values with an
  * explicit stack, so deep documents cannot overflow the call stack; the recursion that remains is bounded
  * by the query.
+ *
+ * <p>Every node visit counts against {@link Limits#maxVisitedNodes}: each node a selector produces, each node
+ * a descendant segment walks through and each node a filter tests. A query that exceeds a limit fails with a
+ * {@link JsonException}; it never returns a partial result.
  */
 final class Evaluator {
 
+    /** The thread's interrupt status is checked whenever the visit count passes a multiple of 2^12 = 4,096. */
+    private static final int INTERRUPT_CHECK_SHIFT = 12;
+
     private final JsonProvider provider;
     private final NodeImpl root;
+    private final long maxVisitedNodes;
+    private final int maxResultSize;
+    private final int maxDepth;
+    private long visitedNodes;
 
     /** Results of absolute queries inside filters, created on first use. */
     private IdentityHashMap<Query, List<NodeImpl>> absoluteNodes;
@@ -77,10 +89,14 @@ final class Evaluator {
      * @param document the query argument
      * @param provider creates the numbers that {@code length()} and {@code count()} return, and the
      *     {@link jakarta.json.JsonPointer}s of the selected nodes
+     * @param limits the limits of this run
      */
-    Evaluator(JsonValue document, JsonProvider provider) {
+    Evaluator(JsonValue document, JsonProvider provider, Limits limits) {
         this.provider = provider;
         this.root = NodeImpl.root(provider, document);
+        this.maxVisitedNodes = limits.maxVisitedNodes;
+        this.maxResultSize = limits.maxResultSize;
+        this.maxDepth = limits.maxDepth;
     }
 
     /** Receives the nodes a query selects, in order; returns false to stop the evaluation. */
@@ -92,10 +108,47 @@ final class Evaluator {
     List<NodeImpl> run(Query query) {
         List<NodeImpl> result = new ArrayList<>();
         evaluate(query, root, node -> {
+            if (result.size() >= maxResultSize) {
+                throw new JsonException(JsonPathMessages.get("path.limit.result", String.valueOf(maxResultSize)));
+            }
             result.add(node);
             return true;
         });
         return result;
+    }
+
+    /**
+     * Counts node visits against the limit, before the nodes are visited, and checks for interruption now and
+     * then. Kept small so that it inlines into the selection loops.
+     */
+    private void visit(int count) {
+        long before = visitedNodes;
+        long after = before + count;
+        visitedNodes = after;
+        if (after > maxVisitedNodes || (before >>> INTERRUPT_CHECK_SHIFT) != (after >>> INTERRUPT_CHECK_SHIFT)) {
+            checkLimits(after);
+        }
+    }
+
+    private void checkLimits(long visited) {
+        if (visited > maxVisitedNodes) {
+            throw new JsonException(JsonPathMessages.get("path.limit.visited", String.valueOf(maxVisitedNodes)));
+        }
+        if (Thread.currentThread().isInterrupted()) {
+            throw new JsonException(JsonPathMessages.get("path.interrupted"));
+        }
+    }
+
+    /** Fails for the children of a node at the depth limit. */
+    private void checkDepth(NodeImpl node) {
+        if (node.depth() >= maxDepth) {
+            throw tooDeep(maxDepth);
+        }
+    }
+
+    /** The exception for query arguments nested deeper than the limit. */
+    static JsonException tooDeep(int maxDepth) {
+        return new JsonException(JsonPathMessages.get("path.limit.depth", String.valueOf(maxDepth)));
     }
 
     /** Runs a query inside a filter; absolute queries are evaluated once per run. */
@@ -203,12 +256,17 @@ final class Evaluator {
         JsonValue value = node.getValue();
         ValueType kind = value.getValueType();
         if (kind == ValueType.OBJECT) {
-            for (Map.Entry<String, JsonValue> member : ((JsonObject) value).entrySet()) {
+            checkDepth(node);
+            JsonObject object = (JsonObject) value;
+            visit(object.size());
+            for (Map.Entry<String, JsonValue> member : object.entrySet()) {
                 stack.push(node.child(member.getValue(), member.getKey()));
             }
         } else if (kind == ValueType.ARRAY) {
+            checkDepth(node);
             JsonArray array = (JsonArray) value;
             int size = array.size();
+            visit(size);
             for (int i = 0; i < size; i++) {
                 stack.push(node.child(array.get(i), i));
             }
@@ -237,6 +295,8 @@ final class Evaluator {
             if (children == null) {
                 return selectChildren(node, filter, segments, next, sink);
             }
+            // Produced again by this selector: counted like a second visit, as when computed again.
+            visit(to - from);
             for (int i = from; i < to; i++) {
                 if (!selectChild(children[i], filter, segments, next, sink)) {
                     return false;
@@ -251,6 +311,7 @@ final class Evaluator {
                 String name = ((Name) selector).name;
                 JsonValue member = ((JsonObject) value).get(name);
                 if (member != null) {
+                    visit(1);
                     return apply(segments, next, node.child(member, name), sink);
                 }
             }
@@ -266,6 +327,7 @@ final class Evaluator {
             long normalized = index >= 0 ? index : size + index;
             if (normalized >= 0 && normalized < size) {
                 int i = (int) normalized;
+                visit(1);
                 return apply(segments, next, node.child(array.get(i), i), sink);
             }
             return true;
@@ -281,14 +343,19 @@ final class Evaluator {
         JsonValue value = node.getValue();
         ValueType kind = value.getValueType();
         if (kind == ValueType.OBJECT) {
-            for (Map.Entry<String, JsonValue> member : ((JsonObject) value).entrySet()) {
+            checkDepth(node);
+            JsonObject object = (JsonObject) value;
+            visit(object.size());
+            for (Map.Entry<String, JsonValue> member : object.entrySet()) {
                 if (!selectChild(node.child(member.getValue(), member.getKey()), filter, segments, next, sink)) {
                     return false;
                 }
             }
         } else if (kind == ValueType.ARRAY) {
+            checkDepth(node);
             JsonArray array = (JsonArray) value;
             int size = array.size();
+            visit(size);
             for (int i = 0; i < size; i++) {
                 if (!selectChild(node.child(array.get(i), i), filter, segments, next, sink)) {
                     return false;
@@ -319,7 +386,7 @@ final class Evaluator {
             long lower = Math.min(Math.max(nStart, 0), len);
             long upper = Math.min(Math.max(nEnd, 0), len);
             for (long i = lower; i < upper; i += step) {
-                if (!apply(segments, next, node.child(array.get((int) i), (int) i), sink)) {
+                if (!sliced(node, array, (int) i, segments, next, sink)) {
                     return false;
                 }
             }
@@ -327,12 +394,17 @@ final class Evaluator {
             long upper = Math.min(Math.max(nStart, -1), len - 1);
             long lower = Math.min(Math.max(nEnd, -1), len - 1);
             for (long i = upper; lower < i; i += step) {
-                if (!apply(segments, next, node.child(array.get((int) i), (int) i), sink)) {
+                if (!sliced(node, array, (int) i, segments, next, sink)) {
                     return false;
                 }
             }
         }
         return true;
+    }
+
+    private boolean sliced(NodeImpl node, JsonArray array, int index, List<Segment> segments, int next, Sink sink) {
+        visit(1);
+        return apply(segments, next, node.child(array.get(index), index), sink);
     }
 
     // ---- logical expressions ----
@@ -362,7 +434,8 @@ final class Evaluator {
         }
         if (expr instanceof Comparison) {
             Comparison comparison = (Comparison) expr;
-            return Values.compare(value(comparison.left, current), comparison.op, value(comparison.right, current));
+            return Values.compare(
+                    value(comparison.left, current), comparison.op, value(comparison.right, current), maxDepth);
         }
         return logical(((Test) expr).operand, current);
     }

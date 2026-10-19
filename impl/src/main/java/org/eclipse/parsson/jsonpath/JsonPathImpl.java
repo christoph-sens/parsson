@@ -35,11 +35,13 @@ public final class JsonPathImpl implements JsonPath {
     private final String query;
     private final Ast.Query ast;
     private final JsonProvider provider;
+    private final Limits limits;
 
-    private JsonPathImpl(String query, Ast.Query ast, JsonProvider provider) {
+    private JsonPathImpl(String query, Ast.Query ast, JsonProvider provider, Limits limits) {
         this.query = query;
         this.ast = ast;
         this.provider = provider;
+        this.limits = limits;
     }
 
     /**
@@ -48,20 +50,36 @@ public final class JsonPathImpl implements JsonPath {
      * @param query the query string
      * @param provider creates the values of literals and function results, and the {@link jakarta.json.JsonPointer}s
      *     of selected nodes
+     * @param maxVisitedNodes the maximum number of node visits per evaluation: each node a selector produces, each
+     *     node a descendant segment walks through and each node a filter tests
+     * @param maxResultSize the maximum number of nodes in a result
+     * @param maxDepth the maximum depth to which a query walks into the query argument and compares values; the
+     *     root has depth 0
      * @return the query
      * @throws NullPointerException if {@code query} is {@code null}
+     * @throws IllegalArgumentException if a limit is negative
      * @throws JsonException if {@code query} is not a well-formed and valid JSONPath query; the message gives the
      *     reason, the position and an excerpt of the query
      */
-    public static JsonPath create(String query, JsonProvider provider) {
-        Objects.requireNonNull(query, "query");
-        return new JsonPathImpl(query, Parser.parse(query, provider), provider);
+    public static JsonPath create(String query, JsonProvider provider, long maxVisitedNodes, int maxResultSize,
+                                  int maxDepth) {
+        return create(query, provider, new Limits(maxVisitedNodes, maxResultSize, maxDepth));
     }
 
+    static JsonPath create(String query, JsonProvider provider, Limits limits) {
+        Objects.requireNonNull(query, "query");
+        return new JsonPathImpl(query, Parser.parse(query, provider), provider, limits);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @throws JsonException if the evaluation exceeds a limit: visited nodes, result size or depth
+     */
     @Override
     public List<Node> query(JsonValue target) {
         Objects.requireNonNull(target, "target");
-        return Collections.<Node>unmodifiableList(new Evaluator(target, provider).run(ast));
+        return Collections.<Node>unmodifiableList(new Evaluator(target, provider, limits).run(ast));
     }
 
     @Override
