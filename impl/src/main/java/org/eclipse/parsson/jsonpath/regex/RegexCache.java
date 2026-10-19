@@ -48,6 +48,9 @@ public final class RegexCache {
     /** Maximum number of automaton instructions of the cached expressions together. */
     private final long maxInstructions;
 
+    /** The memory budget of the automata of the cached expressions. */
+    private final DfaBudget budget;
+
     /** Creates an empty cache, one per {@code match()} or {@code search()} call of a query. */
     public RegexCache() {
         this(IRegexp.MAX_PROGRAM_SIZE);
@@ -60,8 +63,14 @@ public final class RegexCache {
      * @param maxProgramSize the maximum number of automaton instructions per expression
      */
     public RegexCache(int maxProgramSize) {
+        this(maxProgramSize, DfaBudget.SHARED);
+    }
+
+    /** As {@link #RegexCache(int)}, with the automata counting against {@code budget}; for tests. */
+    RegexCache(int maxProgramSize, DfaBudget budget) {
         this.maxProgramSize = maxProgramSize;
         this.maxInstructions = 2L * maxProgramSize;
+        this.budget = budget;
     }
 
     /**
@@ -75,7 +84,7 @@ public final class RegexCache {
         if (cached != null) {
             return cached;
         }
-        Optional<IRegexp> compiled = IRegexp.compile(regexp, maxProgramSize);
+        Optional<IRegexp> compiled = IRegexp.compile(regexp, maxProgramSize, budget);
         long weight = compiled.map(r -> (long) r.programSize()).orElse(1L);
         synchronized (this) {
             if (entries.size() >= MAX_ENTRIES || instructions + weight > maxInstructions) {

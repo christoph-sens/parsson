@@ -16,10 +16,7 @@
 
 package org.eclipse.parsson.jsonpath.regex;
 
-import java.util.Map;
 import java.util.Optional;
-import java.util.WeakHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * I-Regexp (RFC 9485), the interoperable regular expression format used by the {@code match()}
@@ -36,7 +33,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>Expressions may come from documents ({@code match(@.value, @.pattern)}), so the memory held by
  * cached automata is bounded: each automaton by {@link #MAX_DFA_BYTES_PER_AUTOMATON} and all of them
  * together by {@link #MAX_DFA_BYTES}. An automaton that reaches its own bound stops growing; when all of
- * them together reach theirs, they are all discarded and rebuilt on demand, as RE2 does. Without a cached
+ * them together reach theirs, they are all discarded and rebuilt on demand, as RE2 does (see {@code DfaBudget}). Without a cached
  * state, matching falls back to the plain set-of-states simulation, which is slower but still linear.
  * There is no shared cache of compiled expressions: a query holds its literal patterns and a
  * {@link RegexCache} for the patterns it reads from documents.
@@ -46,7 +43,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * expressions (RFC 9485, section 8, allows implementations to set such limits).
  *
  * <p>{@code RegexParser} builds a {@code RegexTree}, {@code RegexProgram} compiles it into the automaton,
- * and {@code LazyDfa} runs it, with {@code RegexSimulation} as the fallback. This class holds the memory
+ * and {@code LazyDfa} runs it, with {@code RegexSimulation} as the fallback; {@code DfaBudget} holds the memory
  * budget the automata share.
  *
  * <p>Ported from Treetrail (https://github.com/treetrail/treetrail) by the same author.
@@ -78,26 +75,17 @@ public final class IRegexp {
     /** Approximate memory, in bytes, that all cached automata may hold together. */
     static final long MAX_DFA_BYTES = 8L << 20;
 
-    /**
-     * The compiled expressions still reachable, so that discarding the automata reaches those that queries
-     * hold but do not use; guarded by the class lock.
-     */
-    private static final Map<IRegexp, Boolean> LIVE = new WeakHashMap<>();
-
-    /** Estimated bytes held by the automata of the current generation. */
-    private static final AtomicLong DFA_BYTES = new AtomicLong();
-
-    /** Generation of the automata; incremented to discard all of them at once. */
-    private static volatile int dfaGeneration;
-
     private final RegexProgram program;
+    /** The memory budget this expression's automata count against. */
+    private final DfaBudget budget;
     /** Null until first used and after the automata were discarded. */
     private volatile LazyDfa matchDfa;
     /** Null until first used and after the automata were discarded. */
     private volatile LazyDfa searchDfa;
 
-    private IRegexp(RegexProgram program) {
+    private IRegexp(RegexProgram program, DfaBudget budget) {
         this.program = program;
+        this.budget = budget;
     }
 
     /**
@@ -121,51 +109,23 @@ public final class IRegexp {
      * @return the compiled expression, or empty if {@code regexp} is not a valid I-Regexp or exceeds a limit
      */
     public static Optional<IRegexp> compile(String regexp, int maxProgramSize) {
+        return compile(regexp, maxProgramSize, DfaBudget.SHARED);
+    }
+
+    /** As {@link #compile(String, int)}, with the automata counting against {@code budget}. */
+    static Optional<IRegexp> compile(String regexp, int maxProgramSize, DfaBudget budget) {
         IRegexp compiled;
         try {
-            compiled = new IRegexp(RegexProgram.compile(new RegexParser(regexp).parse(), maxProgramSize));
+            compiled = new IRegexp(RegexProgram.compile(new RegexParser(regexp).parse(), maxProgramSize), budget);
         } catch (InvalidRegexp e) {
             return Optional.empty();
         }
-        synchronized (IRegexp.class) {
-            LIVE.put(compiled, Boolean.TRUE);
-        }
+        budget.register(compiled);
         return Optional.of(compiled);
     }
 
-    /**
-     * Discards all cached automata unless that already happened since {@code generation} was read.
-     * The compiled expressions drop their automata so that the memory can be reclaimed; an automaton in
-     * use by a running match stops growing and is collected when that match ends.
-     */
-    private static synchronized void discardAutomata(int generation) {
-        if (dfaGeneration == generation) {
-            dfaGeneration = generation + 1;
-            DFA_BYTES.set(0);
-            for (IRegexp live : LIVE.keySet()) {
-                live.dropAutomata();
-            }
-        }
-    }
-
-    /** Reserves memory for all automata of a generation; if they are full, discards them all and returns false. */
-    static boolean reserveShared(long cost, int generation) {
-        if (DFA_BYTES.addAndGet(cost) > MAX_DFA_BYTES) {
-            DFA_BYTES.addAndGet(-cost);
-            discardAutomata(generation);
-            return false;
-        }
-        return true;
-    }
-
-    /** Returns memory reserved by {@link #reserveShared} unless its generation has been discarded since. */
-    static void releaseShared(long cost, int generation) {
-        if (generation == dfaGeneration) {
-            DFA_BYTES.addAndGet(-cost);
-        }
-    }
-
-    private void dropAutomata() {
+    /** Drops the automata; called when the budget discards all of them. */
+    void dropAutomata() {
         matchDfa = null;
         searchDfa = null;
     }
@@ -175,18 +135,18 @@ public final class IRegexp {
      * budget. The amount is approximate if a match is still running on them.
      */
     void retire() {
-        int generation = dfaGeneration;
+        int generation = budget.generation();
         for (LazyDfa dfa : new LazyDfa[] {matchDfa, searchDfa}) {
             if (dfa != null && dfa.generation() == generation) {
-                releaseShared(dfa.bytes(), generation);
+                budget.release(dfa.bytes(), generation);
             }
         }
         dropAutomata();
     }
 
-    /** Estimated bytes held by the cached automata; for tests. */
+    /** Estimated bytes held by the cached automata of the shared budget; for tests. */
     static long cachedDfaBytes() {
-        return DFA_BYTES.get();
+        return DfaBudget.SHARED.bytes();
     }
 
     /** Number of automaton instructions; for {@link RegexCache}. */
@@ -196,7 +156,7 @@ public final class IRegexp {
 
     /** Generation of the automata, incremented whenever all of them are discarded; for tests. */
     static int dfaGeneration() {
-        return dfaGeneration;
+        return DfaBudget.SHARED.generation();
     }
 
     /** Estimated bytes held by this expression's automaton for one mode; for tests. */
@@ -231,7 +191,7 @@ public final class IRegexp {
 
     /** Returns the automaton of the current generation for a mode, creating it if necessary. */
     private LazyDfa automaton(boolean search) {
-        int generation = dfaGeneration;
+        int generation = budget.generation();
         LazyDfa dfa = search ? searchDfa : matchDfa;
         if (dfa != null && dfa.generation() == generation) {
             return dfa;
@@ -239,7 +199,7 @@ public final class IRegexp {
         synchronized (this) {
             dfa = search ? searchDfa : matchDfa;
             if (dfa == null || dfa.generation() != generation) {
-                dfa = new LazyDfa(program, search, generation);
+                dfa = new LazyDfa(program, search, generation, budget);
                 if (search) {
                     searchDfa = dfa;
                 } else {

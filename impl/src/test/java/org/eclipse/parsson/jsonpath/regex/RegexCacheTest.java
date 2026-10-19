@@ -22,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Random;
+
 import org.junit.jupiter.api.Test;
 
 /** The per-call cache of patterns that queries read from documents. */
@@ -57,20 +59,42 @@ class RegexCacheTest {
 
     @Test
     void returnsTheMemoryOfEvictedAutomata() {
-        RegexCache cache = new RegexCache();
+        // A budget of its own: the shared one may be full from other tests in the same JVM.
+        DfaBudget budget = new DfaBudget(IRegexp.MAX_DFA_BYTES);
+        RegexCache cache = new RegexCache(IRegexp.MAX_PROGRAM_SIZE, budget);
         IRegexp evicted = cache.get("(a|b)*a(a|b){8}").get();
         evicted.matches(repeat("ab", 50));
         long automaton = evicted.automatonBytes(false);
-        int generation = IRegexp.dfaGeneration();
-        long before = IRegexp.cachedDfaBytes();
+        assertTrue(automaton > 0);
+        assertEquals(automaton, budget.bytes());
 
         for (int n = 0; n < RegexCache.MAX_ENTRIES; n++) {
             cache.get("x{" + n + "}");
         }
 
-        assertTrue(automaton > 0);
         assertEquals(0, evicted.automatonBytes(false));
-        assertEquals(generation, IRegexp.dfaGeneration());
-        assertEquals(before - automaton, IRegexp.cachedDfaBytes());
+        assertEquals(0, budget.generation(), "evicting does not discard the other automata");
+        assertEquals(0, budget.bytes());
+    }
+
+    @Test
+    void discardsAllAutomataWhenTheBudgetIsFull() {
+        // Smaller than the bound of one automaton, so the shared budget is what runs full.
+        long maxBytes = 1L << 16;
+        DfaBudget budget = new DfaBudget(maxBytes);
+        RegexCache cache = new RegexCache(IRegexp.MAX_PROGRAM_SIZE, budget);
+        IRegexp regexp = cache.get("(a|b)*a(a|b){12}").get();
+        Random random = new Random(7);
+        for (int i = 0; i < 2_000 && budget.generation() == 0; i++) {
+            StringBuilder input = new StringBuilder();
+            for (int j = 0; j < 60; j++) {
+                input.append(random.nextBoolean() ? 'a' : 'b');
+            }
+            regexp.matches(input.toString());
+            assertTrue(budget.bytes() <= maxBytes);
+        }
+
+        assertTrue(budget.generation() > 0, "a full budget discards all automata");
+        assertTrue(regexp.matches(repeat("ab", 10) + "a" + repeat("b", 12)), "automata are rebuilt on demand");
     }
 }
