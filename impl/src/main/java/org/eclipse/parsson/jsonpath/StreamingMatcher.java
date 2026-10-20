@@ -18,7 +18,9 @@ package org.eclipse.parsson.jsonpath;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import jakarta.json.JsonArray;
@@ -585,9 +587,9 @@ final class StreamingMatcher implements JsonPath.Matcher {
         Frame node;
         if (parent == null) {
             node = new Frame(null, event, NodeImpl.root(provider, null), null);
-            List<Item> items = new ArrayList<>(2);
+            Items items = new Items();
             addItem(items, 0, null, 1);
-            node.items = items.toArray(new Item[0]);
+            node.items = items.toArray();
         } else if (parent.array) {
             long index = parent.length++;
             decideIndices(parent, false);
@@ -789,9 +791,14 @@ final class StreamingMatcher implements JsonPath.Matcher {
         return false;
     }
 
-    /** Computes the items of a child from those of its parent: passes descendant items on, applies selectors. */
+    /**
+     * Computes the items of a child from those of its parent: passes descendant items on, applies selectors. Each
+     * item of the parent counts as a visit: nested undecided selections can give a node many items (one per
+     * combination of pending decisions), and this is where the work for them is done.
+     */
     private Item[] childItems(Frame parent, Frame child, String name, long index) {
-        List<Item> items = new ArrayList<>(4);
+        evaluator.visitNodes(parent.items.length);
+        Items items = new Items();
         for (Item item : parent.items) {
             if (state(item.cond) == FALSE) {
                 continue;
@@ -803,11 +810,11 @@ final class StreamingMatcher implements JsonPath.Matcher {
                 select(items, item, parent, child, name, index);
             }
         }
-        return items.toArray(new Item[0]);
+        return items.toArray();
     }
 
     /** Applies the selectors of the item's segment to a child and adds the items of the selections. */
-    private void select(List<Item> items, Item item, Frame parent, Frame child, String name, long index) {
+    private void select(Items items, Item item, Frame parent, Frame child, String name, long index) {
         for (Selector selector : segments.get(item.index).selectors) {
             Decision decision = null;
             if (selector instanceof Name) {
@@ -845,20 +852,85 @@ final class StreamingMatcher implements JsonPath.Matcher {
     }
 
     /** Adds the item for a node that has passed {@code index} segments. */
-    private void addItem(List<Item> items, int index, Cond cond, long count) {
+    private void addItem(Items items, int index, Cond cond, long count) {
         boolean descendant = index < n && segments.get(index).descendant;
         addItem(items, index, descendant, cond, count);
     }
 
     /** Adds an item, merged with an equal one. */
-    private static void addItem(List<Item> items, int index, boolean descendant, Cond cond, long count) {
-        for (Item item : items) {
-            if (item.index == index && item.descendant == descendant && item.cond == cond) {
-                item.count = add(item.count, count);
-                return;
+    private static void addItem(Items items, int index, boolean descendant, Cond cond, long count) {
+        Item item = items.find(index, descendant, cond);
+        if (item != null) {
+            item.count = add(item.count, count);
+        } else {
+            items.add(new Item(index, descendant, cond, count));
+        }
+    }
+
+    /**
+     * The items of a node while they are computed. Equal items are merged; a node usually has a few items, which are
+     * searched in order, but nested undecided selections can give it thousands, which are then found by hash.
+     */
+    private static final class Items {
+        private static final int LINEAR = 8;
+
+        private final List<Item> list = new ArrayList<>(4);
+        private Map<ItemKey, Item> byKey;
+
+        Item find(int index, boolean descendant, Cond cond) {
+            if (byKey != null) {
+                return byKey.get(new ItemKey(index, descendant, cond));
+            }
+            for (Item item : list) {
+                if (item.index == index && item.descendant == descendant && item.cond == cond) {
+                    return item;
+                }
+            }
+            return null;
+        }
+
+        void add(Item item) {
+            list.add(item);
+            if (byKey != null) {
+                byKey.put(new ItemKey(item.index, item.descendant, item.cond), item);
+            } else if (list.size() > LINEAR) {
+                byKey = new HashMap<>();
+                for (Item each : list) {
+                    byKey.put(new ItemKey(each.index, each.descendant, each.cond), each);
+                }
             }
         }
-        items.add(new Item(index, descendant, cond, count));
+
+        Item[] toArray() {
+            return list.toArray(new Item[0]);
+        }
+    }
+
+    /** The identity of an item: segment index, kind and condition (compared by reference, as conditions are). */
+    private static final class ItemKey {
+        final int index;
+        final boolean descendant;
+        final Cond cond;
+
+        ItemKey(int index, boolean descendant, Cond cond) {
+            this.index = index;
+            this.descendant = descendant;
+            this.cond = cond;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (!(o instanceof ItemKey)) {
+                return false;
+            }
+            ItemKey other = (ItemKey) o;
+            return index == other.index && descendant == other.descendant && cond == other.cond;
+        }
+
+        @Override
+        public int hashCode() {
+            return (31 * index + (descendant ? 1 : 0)) * 31 + System.identityHashCode(cond);
+        }
     }
 
     /** The decision whether a filter accepts a child; one per filter and child. */
