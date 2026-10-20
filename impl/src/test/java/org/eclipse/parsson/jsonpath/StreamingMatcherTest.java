@@ -21,10 +21,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.StringReader;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -264,6 +266,28 @@ class StreamingMatcherTest {
                 }
             });
         }
+    }
+
+    @Test
+    void countsTheWorkForRoutesThatWaitForDecisions() {
+        // Found by fuzzing: nested filters and indices counted from the end that are not decided yet give each node a
+        // number of items that grows with the square of its depth. Before the work for them was counted as visits
+        // (and equal items were found by hash), this document of 2 KB took hours with fewer than 1,000,000 visits.
+        JsonPath path = PROVIDER.createPath("$..[?@..*]..[-5]..a.a",
+                Collections.singletonMap(JsonPath.MAX_VISITED_NODES, 1_000_000));
+        String json = EvaluatorTest.nestedArrays(999).toString();
+        assertTimeoutPreemptively(Duration.ofSeconds(30), () -> {
+            try (JsonParser parser = PROVIDER.createParser(new StringReader(json))) {
+                JsonPath.Matcher matcher = path.matcher(parser);
+                assertEquals("Query visited more than 1000000 nodes, the limit",
+                        assertThrows(JsonException.class, () -> {
+                            while (matcher.find()) {
+                                matcher.getPath();
+                            }
+                        }).getMessage());
+            }
+        });
+        assertEquals(Collections.emptyList(), paths("$..[?@..*]..[-5]..a.a", EvaluatorTest.nestedArrays(100).toString()));
     }
 
     @Test
