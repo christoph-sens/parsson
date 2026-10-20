@@ -43,6 +43,7 @@ import jakarta.json.JsonValue;
 import jakarta.json.stream.JsonLocation;
 import jakarta.json.stream.JsonParser;
 import jakarta.json.stream.JsonParser.Event;
+import jakarta.json.stream.JsonParsingException;
 
 import org.junit.jupiter.api.Test;
 
@@ -288,6 +289,19 @@ class StreamingMatcherTest {
             }
         });
         assertEquals(Collections.emptyList(), paths("$..[?@..*]..[-5]..a.a", EvaluatorTest.nestedArrays(100).toString()));
+    }
+
+    @Test
+    void failsOnATruncatedValueItSkips() {
+        // Found by fuzzing: the matcher skips {"x": 1 with skipObject(), which looped forever at the end of the text.
+        for (String json : new String[] {"{'a': {'x': 1", "{'a': [1, 2", "[[1, 2"}) {
+            assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+                try (JsonParser parser = parser(json)) {
+                    JsonPath.Matcher matcher = PROVIDER.createPath("$.b").matcher(parser);
+                    assertThrows(JsonParsingException.class, matcher::find, json);
+                }
+            }, json);
+        }
     }
 
     @Test
